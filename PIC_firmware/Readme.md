@@ -6,7 +6,7 @@ Modifications are :
 - load SKDOS.BIN if disk set 1 selected
 - enable 512 bytes per sector in this case.
 
-Use hex file provided into PIC directory to flash the new firmware into the PIC.
+Use hex file to flash the new firmware into the PIC.
 
 Even with the modifications CPM 68K is still useable if you select disk set 0.
 
