@@ -7,6 +7,6 @@ Ask your favorite search engine... and rtfm !
 
 All PIC softwares here are based and credited to Just4Fun : https://hackaday.io/project/177988-68k-mbc-a-3-ics-68008-homebrew-computer
 
-Sk*DOS is Peter Stark propertie and his legal status is unknow to me but seems to be under licence. In case of problem just take contact and we will solve it.
+SK*DOS is Peter Stark propertie and his legal status is unknow to me but seems to be under licence. In case of problem just take contact and we will solve it.
 
 "Bios.asm" is my own work and is provided under GPL V3 licence.
