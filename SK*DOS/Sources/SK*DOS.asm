@@ -1,0 +1,5304 @@
+         OPT      PAG
+
+* SK*DOS DISK OPERATING SYSTEM FOR THE 68K
+
+* COPYRIGHT (C) 1986 BY PETER A. STARK
+* STAR-K SOFTWARE SYSTEMS CORP.
+* PO BOX 209, MT. KISCO NY 10549
+
+* THIS IS THE .COR VERSION FOR CUSTOMIZATION
+
+         ORG      $1000                DUMMY EQUATE
+*         LIB      1.TXEQUATE
+* UPDATE HISTORY:
+* VERSION 0.4 - 6-3-86 - UPDATED TO REFLECT 6809 SK*DOS
+*    SUGGESTIONS FROM BERT VAN DER BURG - MOVED LDS AND
+*    JSR RSTRIO DIRECTLY TO WARM START
+* VERSION 5 - 6-8-86 - CHANGED DRIVERS TO WRITE TO DLATCH ONLY WHEN
+*    IT IS DIFFERENT FROM MLATCH. DO RSTRIO AT WARM START.
+*    ADDED TRAP FLAG, AND INITIALIZE ALL EXCEPTION VECTORS
+*    IF TRPFLG IS NON-ZERO. ADDED DISEEK AND DIREST TRAPS TO
+*    $AXXX TRAPS.
+* VERSION 0.6 - 9-21-86 - MOD TO LET SYSTEM=ALL WORK; CHANGE SO
+*    DEPCTR STARTS WITH 1 NOT 0;
+* VERSION 0.7 = 10-3-86 - MOD TO ADD BINARY FILE LOAD CODES OF
+*    04, 05, 0F, 18, 19, CHANGE DRUSED TABLE, ADD DOSORG, LATRAP,
+*    AND BETRAP, ADDED INTERRUPT ENABLE AND DISABLE CALLS,
+*    CHANGED FCS20,9,10 SO THEY CHECK DRUSED AND PUT IN PHYSICAL
+*    SECTOR NUMBER INTO FCBPHY; ALSO ADDED WRITE PROTECTION
+*    ADDED WINCHESTER TABLE, REARRANGED USR AND SYS DATA
+* VERSION 0.8 - 11-1-86 - ADDED USER-SETTABLE PRECOMP CYLINDER
+* VERSION 0.9 - 11-9-86 - CHANGED CLOCK FROM BCD TO BINARY,
+*    FIXED PROBLEM WITH PAUSE; FIXED ERROR DETECTION WITH 1772
+*    DISK CONTROLLER ROUTINE IN PTA VERSION
+* VERSION 1.0 - 12-26-86 - CHANGED HEXIN TO ACCEPT LOWER CASE,
+*    ADDED TOUPPER(D5) TO CONVERT LOWER TO UPPER CASE, CHANGED
+*    COLDST SO IT SAVES CURRENT IRQ STATUS
+* VERSION 1.1 - 12-28-86 - TXTRAP NOW SAVES CURFCB ONLY ON TRAPS
+*    THROUGH 29, INVOLVING THE FCB
+* VERSION 1.2 - 1-15-87 ETC. - MODIFIED FOR I/O REDIRECTION AND
+*    USER-CHANGEABLE DEVICE DRIVERS
+* VERSION 1.3 - 1-30-87 - FIXED PROBLEM WITH RANDOM COPYING AND
+*    SET UP BATCH FILES
+* VERSION 1.4 - 2-5-87 - FIXED STACK FRAME FOR USE WITH 68010/20
+* VERSION 1.5 - 2-16-87 - ADDED CACHE, FIXED PAUSE & .BAT PROBLEMS
+* VERSION 1.6 - 2-23-87 - ADDED LF AFTER INLINE AND GETTIM CALL
+* VERSION 1.7 - 3-1-87 - ADDED SEENXT FUNCTION
+* VERSION 1.8 - 3-15-87 - ADDED JUMPS AT 10B0 FOR BIOS
+* VERSION 1.9 - 4-16-87 - FIXED IRQ ON AND OFF FUNCTIONS
+* VERSION 2.0 - 6-27-87 - WARMSTART REENTRY VIA TRAP FOR SUP STATE
+* VERSION 2.1 - 12-26-87 - LENGTHEN WX1 DELAYS
+* VERSION 2.2 - 3-28-88 - FIX RANDOM, BASIC FCBPTR, NO SPACE COMP
+* VERSION 2.3 - 4-18-88 - ADAPT FOR 68020
+* VERSION 2.4 - 5-9-88 - TYPEAHEAD
+* VERSION 2.5 - 6-9-88 - MULTIPLE DIRECTORIES
+* VERSION 2.6 - 8-19-88 - PRINT SCREEN ADDED IN PT68K-2 BIOS
+* VERSION 2.7 - 8-20-88 - ADDED NRETRY AND FOTHER
+* VERSION 2.8 - 1-19-89 - LENGTHENED BATFCB TO 608 BYTES
+* VERSION 2.9 - 2-23-89 - FIXED HARD DRIVE B PROBLEM
+* VERSION 3.0 - 6-27-89 - FIXED LPOINT PROBLEM IN DOCMND
+* VERSION 3.1 - 9-06-89 - ADDED CHECK TO FWRITE FOR OPEN FILE
+* VERSION 3.2 - 06-29-90 - SELECTABLE DEFAULT SPACE COMPRESSION
+* VERSION 3.3 - 12-1-90 - ADDED DATA AND MEMBEG FOR CRENSHAW'S JINK
+
+*      C A U T I O N     *
+* If LVL5IA or PUTCD5 change location, make sure to change BIOSP2/4X.
+
+
+         BRA.S    LOCKUP
+
+         DC.W     $0303            VERSION NUMBER
+
+LOCKUP   DC.L     0,0,0,0,0,0,0,0  ROOM FOR SERIAL NO AND ID
+
+
+
+         DC       $A02E                 AND SOME DUMMY STUFF
+         MOVEM.L  (A7)+,A1-A3
+         FCC      '(C) 1986, 1990 BY PETER A. STARK. '
+
+
+
+         FCC      'ALL RIGHTS RESERVED',4
+
+
+* FILE CONTROL BLOCK EQUATES
+
+FCBDIR   EQU      0 DIRECTORY LETTER (0 IF ROOT)
+FCBERR   EQU      1 ERROR CODE
+FCBRW    EQU      2 READ=1, WRITE=2
+FCBDRV   EQU      3 DRIVE NUMBER
+FCBNAM   EQU      4 FILE NAME (8 CHARS)
+FCBEXT   EQU      12 FILE EXTENSION (3 CHARS)
+FCBATT   EQU      15 FILE PROT ATTRIBUTES (BITS 4-7)
+FCBFTR   EQU      18 FIRST TRACK OF FILE
+FCBFSE   EQU      19 FIRST SECTOR OF FILE
+FCBLTR   EQU      22 LAST TRACK OF FILE
+FCBLSE   EQU      23 LAST SECTOR OF FILE
+FCBSIZ   EQU      24 2-BYTE FILE SIZE IN SECTORS
+FCBRAN   EQU      26 RANDOM INDICATOR (0=SEQ)
+FCBTIM   EQU      27 TIME
+FCBMON   EQU      28 MONTH
+FCBDAY   EQU      29 DAY OF FILE CREATION
+FCBYR    EQU      30 YEAR
+FCBCTR   EQU      34 CURRENT TRACK IN BUFFER
+FCBCSE   EQU      35 CURRENT SECTOR IN BUFFER
+FCBNMB   EQU      36 TEMPORARY NAME BUFFER (11 CHARS)
+FCBDPT   EQU      49 DATA POINTER TO NEXT BYTE (0-255)
+FCBRIN   EQU      51 RANDOM FILE INDEX POINTER
+FCBNMS   EQU      52 SCRATCH NAME (11 CHARS)
+FCBCOL   EQU      58 COLUMN NUMBER POSITION FOR RBASIC
+FCBSCF   EQU      59 SPACE COMPR FLAG (0=COMPR,FF=NO)
+FCBSPT   EQU      60 SECTORS PER TRACK FOR RANDOM
+FCBUPD   EQU      61 RANDOM UPDATE FLAG
+FCBTMP   EQU      62 TEMP STORAGE FOR RANDOM
+FCBLST   EQU      68 FCB LIST POINTER TO NEXT FCB
+FCBPHY   EQU      72 PHYSICAL DRIVE NUMBER
+FCBDIT   EQU      74 DIRECTORY TRACK (0- )
+FCBDIS   EQU      75 DIRECTORY SECTOR (5- )
+FCBDIB   EQU      77 DIRECTORY STARTING BYTE INDEX
+FCBCRN   EQU      78 2-BYTE CURRENT RECORD NUMBER
+FCBDAT   EQU      96 DATA BUFFER (256 BYTES)
+
+* OFFSETS TO FIELDS IN DEVICE TABLE ENTRY
+
+DTNAME   EQU      0                    NAME ENTRY
+DTPNTR   EQU      4                    POINTER TO DRIVER
+DTLNTH   EQU      8                    LENGTH OF DRIVER
+DTINIT   EQU      12                   INIT VECTOR
+DTINST   EQU      16                   INPUT STATUS VIA TYPEAHEAD
+DTECHO   EQU      20                   INPUT WITH ECHO
+DTNECH   EQU      24                   INPUT WITHOUT ECHO VIA TYPAHD
+DTICNT   EQU      28                   INPUT CONTROL
+DTOUST   EQU      32                   OUTPUT STATUS
+DTOUTC   EQU      36                   OUTPUT A CHARACTER
+DTOCNT   EQU      40                   OUTPUT CONTROL
+DTPLIN   EQU      44                   PRINT LINES
+DTPWID   EQU      45                   PAGE WIDTH
+DTNULL   EQU      46                   NULL WAIT
+DTSLIN   EQU      47                   SKIP LINES
+DTPAUS   EQU      48                   PAUSE FLAG BYTE
+DTDEPC   EQU      49                   DEPTH COUNTER
+DTOCOL   EQU      50                   OUTPUT COLUMN COUNTER
+DTBAUD   EQU      51                   BAUD RATE
+DTEOFI   EQU      52                   END-OF-FILE CHARACTER
+DTXOFF   EQU      53                   X-OFF CHARACTER
+DTXON    EQU      54                   X-ON CHARACTER
+DTSTA1   EQU      56                   INPUT STATUS 1-CHAR ONLY
+DTINE1   EQU      60                   INPUT WITHOUT ECHO 1 CHAR
+DTKILL   EQU      64                   KILL TYPEAHEAD BUFFER
+
+USTACK   EQU      $0E00               USER STACK
+STACK    EQU      $1000               SYSTEM STACK
+
+         ORG      $1000
+
+*         LIB      1.TXSYSDTA         SYSTEM DATA AREA
+* SYSTEM DATA AREA
+
+* ENTRY POINTS
+*   THESE ENTRY POINTS ARE FORCED AT 6-BYTE INTERVALS
+*   TO LEAVE ROOM FOR 4-BYTE ADDRESSES LATER
+
+SYSDTA   EQU      *                      START OF SYSTEM DATA
+
+COLDSV   JMP.L    COLDS COLDSTART
+
+WARMSV   JMP.L    WARMVT WARMSTART VIA TRAP
+
+
+* USER OPTION ADDRESSES
+
+GETDAT   JMP.L    ASKDAT              ENTRY POINT TO GET STARTUP DATE
+
+INTIME   RTS      TRAP FOR TIME ENTRY, ELSE SEQUENCE
+         RTS
+         RTS
+OFFINI   DC.L     SKEND                END OF SK*DOS ADDRESS
+MEMINI   DC.L     $01000000            MEMEND OW AT 16 MEG
+SECTRD   RTS      TRAP FOR CACHE, RAMDISK READ
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+SECTWR   RTS      TRAP FOR CACHE, RAMDISK WRITE
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+SECCOL   RTS      TRAP FOR COLD START INIT
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+SECWAR   RTS      TRAP FOR WARM START INIT
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+SECCHK   RTS      TRAP FOR DISK CHECK
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+         RTS
+SECFL1   DC.W     0                      SECONDARY DRIVER FLAGS
+         DC.L     0
+SECFL2   DC.W     0
+         DC.L     0
+SECFL3   DC.W     0
+         DC.L     0
+
+* JUMPS TO MAKE IT EASY FOR BIOS TO FIND ROUTINES
+
+         ORG      SYSDTA+$00B0
+
+ASKDAV   JMP.L    ASKDAT             ASK FOR DATE
+PSTRNV   JMP.L    PSTRNG             PRINT REQUEST STRING
+
+* ASSORTED FLAGS
+
+         ORG      SYSDTA+$00C0
+
+TRPFLG   DC.B     0                   0 DISABLES TRAP INITIALIZATION
+CPUTYP   DC.B     0                   (680)0(0) OR 1 OR 2
+         DC.B     0                   DUMMY
+         DC.B     0                   DUMMY
+LATRAP   DC.L     $0028               $AXXX TRAP RE-ENTRY
+BETRAP   DC.L     $0008               BUS ERROR TRAP REENTRY
+LSTINT   DC.W     $2700               LAST INTERRUPT STATUS
+
+* PRIMARY DISK DRIVER VECTOR AREA
+
+         ORG      SYSDTA+$100
+
+DICOLD   RTS      PRIMARY COLD-START INIT
+         RTS
+         RTS
+DIWARM   RTS      PRIMARY WARM-START INIT
+         RTS
+         RTS
+DIREAD   RTS      PRIMARY DISK READ VECTOR
+         RTS
+         RTS
+DIWRIT   RTS      PRIMARY DISK WRITE VECTOR
+         RTS
+         RTS
+DICHEK   RTS      PRIMARY DISK CHECK VECTOR
+         RTS
+         RTS
+DIMOFF   RTS      PRIMARY DISK MOTOR OFF VECTOR
+         RTS
+         RTS
+DIREST   RTS      PRIMARY DISK RESTORE VECTOR
+         RTS
+         RTS
+DISEEK   RTS      PRIMARY DISK SEEK VECTOR
+         RTS
+         RTS
+
+* THE FOLLOWING DATA APPLIES TO DISK HARDWARE:
+* DRUSED: LOOK UP LOGICAL DRIVE NUMBER AND CONVERT TO PHYSICAL
+*      DRIVE NUMBER
+
+STPRAT   FCB      3,3,3,3,3,3,3,3,3,3  PRIMARY STEPRATES (DEFAULT TO SLOW)
+VERFLG   FCB      1                    VERIFY FLAG
+         FCB      0                    NOT USED
+DRUSED   FCB      $10                  LOG DRIVES USED IN SYSTEM
+         FCB      $11                    00 = NONE
+         FCB      00                     1X = FLOPPY CONTROLLER
+         FCB      00                     2X = WINCHESTER
+         FCB      00                     4X = OTHER
+         FCB      00                     8X = RAMDISK
+         FCB      00                     XN = PHYSICAL DR NUM N
+         FCB      00
+         FCB      00
+         FCB      00
+DRWPRO   FCB      0,0,0,0,0,0,0,0,0,0  DRIVE WRITE PROTECT TABLE
+NRETRY   FCB      5                    NORMAL NUMBER OF RETRIES
+FOTHER   FCB      0                    0=SK*DOS, 9=MS*DOS DISK FORMAT
+NUMBHD   DC.B     2                   NUMBER OF HARD DRIVES
+
+* PRIMARY CONSOLE DRIVER VECTOR AREA
+
+         ORG      SYSDTA+$180
+
+SINITV   RTS      SERIAL PORT INITIALIZATION ROUTINE
+         RTS
+         RTS
+STATVE   RTS      CHECK KEYBOARD STATUS
+         RTS
+         RTS
+OUTCHV   RTS      OUTPUT CHARACTER TO TERMINAL
+         RTS
+         RTS
+INCHV    RTS      KEYBOARD INPUT WITH ECHO
+         RTS
+         RTS
+KINPUV   RTS      KEYBOARD INPUT WITHOUT ECHO
+         RTS
+         RTS
+OCNTRL   RTS      OUTPUT CHANNEL CONTROL
+         RTS
+         RTS
+ICNTRL   RTS      INPUT CHANNEL CONTROL
+         RTS
+         RTS
+MONITV   RTS      RE-ENTER MONITOR
+         RTS
+         RTS
+RESETV   RTS      COLD RESET OF MONITOR/SYSTEM
+         RTS
+         RTS
+TIMINI   RTS      TIMER INITIALIZE
+         RTS
+         RTS
+TIMOFF   RTS      TIMER OFF
+         RTS
+         RTS
+TIMON    RTS      TIMER ON
+         RTS
+         RTS
+OSTATV   RTS      OUTPUT STATUS VECTOR
+         RTS
+         RTS
+GETDTV   JMP.L    DATONL             DEFAULT GET DATE AND TIME VECTOR
+STATV1   JMP.L    STATVE             STATUS SINGLE CHAR, IF AVAIL
+KINPV1   JMP.L    KINPUV             DITTO LESS ECHO IF AVAIL
+KILLV1   RTS      KILL TYPEAHEAD CONTENTS IF AVAIL
+         RTS
+         RTS
+
+* WINCHESTER DISK DATA AREA
+
+         ORG      SYSDTA+$200
+
+* THIS TABLE CONTAINS DATA FOR TWO PHYSICAL WINCHESTER DRIVES,
+* EACH MAY BE SPLIT UP INTO UP TO FOUR LOGICAL DRIVES. USING
+* THE CONVENTION FROM DRUSED TABLE, THEY WOULD BE CALLED
+*      WINCHESTER DRIVE A: DRIVES 20, 21, 22, 23
+*      WINCHESTER DRIVE B: DRIVES 24, 25, 26, 27
+
+* EACH LOGICAL DRIVE (2X) HAS A 16-BYTE ENTRY IN THE FOLLOWING
+* TABLE. AS NOTED BELOW, THE FIRST TRACK NUMBER MUST ALWAYS BE
+* ZERO FOR DRIVE 20, SINCE THIS DATA IS ALSO STORED ON
+* TRACK 0 SECTOR 0 OF THAT DRIVE
+* UNLIKE FLOPPIES, WINCHESTER TRACKS AND SECTORS ARE BOTH
+* NUMBERED STARTING WITH 0.
+
+
+WINTAB   DC.B     $FF   LOG DRIVE NUMBER ($20)
+         DC.B     $FF   STEP RATE
+         DC.B     $FF   SECTORS PER TRACK-SIDE (USUAL 32)
+         DC.B     $FF   NUMBER OF HEADS (USUALLY 2, 4, 8)
+         DC.W     $FFFF NO OF SECTOR / CYLINDER OF HD
+         DC.W     $FFFF NO OF CYLINDERS (USUALLY 320, 612 ETC.)
+         DC.W     $FFFF FIRST CYL NUMBER (MUST BE 0 FOR 20 AND 24)
+         DC.B     $FF   LAST LOGICAL TRACK NUMBER
+         DC.B     $FF   LAST LOGIVAL SECTOR NUMBER
+         DC.W     $FFFF CYLINDER TO PARK DRIVE AT
+         DC.W     $FFFF PRECOMP STARTING TRACK
+
+         DC.L     -1,-1 SPACE FOR DRIVE 21
+         DC.L     -1,-1
+
+         DC.L     -1,-1 SPACE FOR DRIVE 22
+         DC.L     -1,-1
+
+         DC.L     -1,-1 SPACE FOR DRIVE 23
+         DC.L     -1,-1
+
+         DC.L     -1,-1 SPACE FOR DRIVE 24
+         DC.L     -1,-1
+
+         DC.L     -1,-1 SPACE FOR DRIVE 25
+         DC.L     -1,-1
+
+         DC.L     -1,-1 SPACE FOR DRIVE 26
+         DC.L     -1,-1
+
+         DC.L     -1,-1 SPACE FOR DRIVE 27
+         DC.L     -1,-1
+
+****************************************************
+* THE FOLLOWING LINE ***MUST*** REMAIN SO USERS
+* DON'T HAVE TO REWRITE DATE INPUT ROUTINES WHICH
+* WERE ORG'D IN INPUT FCB DATA AREA!!!
+         ORG      */1024*1024+1024      ORIGIN AT $1400
+****************************************************
+
+*         LIB      1.TXUSRDTA         USER DATA AREA
+         EVEN
+USRFCB   DS.B     608 USER FCB
+LINBUF   DS.B     128 LINE BUFFER
+BACKSP   DC.B     $08 BACKSPACE CHARACTER
+DELETE   DC.B     $18 CONTROL-X
+ENDLIN   DC.B     ':' END OF LINE
+SPACOM   DC.B     0 DEFAULT SPACE COMPRESSION (FF=OFF)
+         DC.B     0
+         DC.B     0
+         DC.B     0
+BECHO    DC.B     8 BACKSPACE ECHO
+SYSDIR   DC.B     0 SYSTEM DIRECTORY LETTER (0=ROOT)
+WRKDIR   DC.B     0 WORK DIRECTORY LETTER (0=ROOT)
+ESCAPE   DC.B     $1B ESCAPE CHARACTER
+SYSTDR   DC.B     0 SYSTEM DEFAULT DRIVE
+WORKDR   DC.B     0 WORK DRIVE
+REPEAT   DC.B     1 REPEAT LINE
+MONTH    DC.B     0 SYSTEM MONTH
+DAY      DC.B     0 DAY
+YEAR     DC.B     0 AND YEAR
+LASTRM   DC.B     $0D LAST TERMINATOR
+USRTAB   DC.L     0 USER COMMAND TABLE
+LPOINT   DC.L     0 LINBUF POINTER
+BREAK    DC.L     0 ESCAPE RETURN ADDRESS
+CURRCH   DC.B     0 CURRENT CHARACTER FROM GETNX
+PRECHR   DC.B     0 PREVIOUS CHARACTER FROM GETNX
+         DC.B     0
+OFFSET   DC.L     0 LOAD OFFSET ADDRESS
+XFERFL   DC.B     0 TRANSFER FLAG
+EXECAD   DC.L     0 EXECUTION ADDRESS FOR BIN FILES
+EXECSR   DC.W     0 SR USED FOR STARTING USER PROGRAMS
+ERRTYP   DC.B     0 LAST FCS ERROR CODE
+FOADDR   DC.L     0 FILE OUTPUT ADDRESS FOR PUTCHR
+FIADDR   DC.L     0 FILE INPUT ADDR FOR GETCHR
+SPECIO   DC.B     0 SPECIAL I/O FLAG
+CMFLAG   DC.B     0 EXECSD FLAG =1 IF CALLED VIA EXECSD
+INDOS    DC.B     1 1 IF IN DOS, 0 IF IN USER PROG
+         DC.B     0
+MEMEND   DC.L     $01000000 END OF MEMORY (NOW AT 16 MEG)
+INECHO   DC.B     $FF INPUT ECHO FLAG (1=ECHO)
+FNCASE   DC.B     $60 USED BY GETNAM FOR UPPER CASE ONLY
+MAXDRV   DC.B     1 MAX DRV NUMBER
+         DC.B     1 UNUSED - WAS VERIFY FLAG
+TRMASK   DC.W     0 TRACE MASK: $8000 FOR TRACE, ELSE $0
+SEQNO    DC.B     0                       SEQUENCE NUMBER
+
+***** FOLLOWING NEEDED HERE BY PROMPT, BEEP, NOBEEP *****
+PROMPT   DC.B     'SK*DOS:  ',4
+
+***** FOLLOWING NEEDED HERE BY RAMDISK *****
+*     DOSID IS USED BY RAMDISK, DAMON, DEVICE, AND CACHE
+* RAMFLG IS USED BY RAMDISK AND CACHE
+RAMFLG   DS.L     1                      RAMDISK ONLY AREA: 5AA51234 IF Y
+RAMADD   DS.L     1                      MEM ADDRESS
+RAMTRS   DS.L     1                      SIZE: TRACKS AND SECTORS
+DOSID    DC.L     $00050204               DOS IDENTIFIER
+ERRVEC   DC.L     0                      USER ERRCODES.SYS VECTOR
+DOSORG   DC.L     COLDSV                 POINTER TO DOS ORIGIN
+
+* FCB AREA - KEEP HERE SO DATE ROUTINES WRITTEN FOR INFCB STAY
+
+         EVEN
+DIRFCB   DS.B     608 DIRECTORY FCB
+SIRFCB   DS.B     608 SIR FCB
+OUTFCB   DS.B     608 FCB FOR DISK OUTPUT
+INFCB    DS.B     608 FCB FOR DISK INPUT
+
+* THE FOLLOWING NEEDED FOR I/O REDIRECTION AND DEVICE DRIVERS
+
+DEVIN    DC.B     0                      INPUT DEVICE NUMBER = 0
+DEVOUT   DC.B     0                      OUTPUT DEVICE NUMBER = 0
+DEVERR   DC.B     1                      ERROR DEVICE NUMBER = 1
+DEVPRT   DC.B     2                      PRINT DEVICE NUMBER = 2
+         EVEN     DEVICE 0 FOLLOWS:
+DEVTAB   DS.L     1                      LOGICAL NAME
+         DS.L     1                      POINTER TO DRIVER
+         DS.L     1                      LENGTH OF DRIVER
+         DS.L     1                      POINTER TO INIT ROUTINE
+D0INST   DS.L     1                      POINTER TO INPUT STATUS CHECK TA
+         DS.L     1                      POINTER TO GET INPUT WITH ECHO TA
+D0NECH   DS.L     1                      POINTER TO GET INPUT W/O ECHO TA
+         DS.L     1                      POINTER TO ICONTRL ROUTINE
+         DS.L     1                      POINTER TO OUTPUT STATUS CHECK
+         DS.L     1                      POINTER TO OUTPUT CHAR ROUTINE
+         DS.L     1                      POINTER TO OCONTRL ROUTINE
+PLINES   DS.B     1                      PRINT LINES CONSTANT
+PWIDTH   DS.B     1                      WIDTH CONSTANT
+NULLWT   DS.B     1                      NULL WAIT CONSTANT
+SLINES   DS.B     1                      SKIP LINES CONSTANT
+PAUSEB   DS.B     1                      PAUSE FLAG
+         DS.B     1                      DEPTH COUNTER
+OCOLUM   DS.B     1                      COLUMN COUNTER
+BAUDRT   DS.B     1                      BAUD RATE
+EOFILC   DS.B     1                      END-OF-FILE CHARACTER
+XOFFC    DS.B     1                      X-OFF CHARACTER
+XONC     DS.B     1                      X-ON CHARACTER
+         DS.B     1
+         DS.L     1                      POINTER TO STATV1 1 CHAR ONLY
+         DS.L     1                      POINTER TO KINPUV1 1 CHAR ONLY
+         DS.L     1                      POINTER TO KILL TYPEAHEAD
+         DS.L     3                      FOR FUTURE USE
+         DS.L     140                    SPACE FOR 7 MORE VECTORS
+DEVDEF   DC.L     'CONS'                 DEFAULT CONSOLE ENTRY
+         DC.L     DEFNAM                 POINTER TO DRIVER (DEFAULT NAME)
+         DC.L     0                      LENGTH OF DRIVER
+         DC.L     SINITV                 POINTER TO INIT ROUTINE
+         DC.L     STATVE                 POINTER TO INPUT STATUS CHECK
+         DC.L     INCHV                  POINTER TO GET INPUT WITH ECHO
+         DC.L     KINPUV                 POINTER TO GET INPUT W/O ECHO
+         DC.L     ICNTRL                 POINTER TO ICONTRL ROUTINE
+         DC.L     OSTATV                 POINTER TO OUTPUT STATUS CHECK
+         DC.L     OUTCHV                 POINTER TO OUTPUT CHAR ROUTINE
+         DC.L     OCNTRL                 POINTER TO OCONTRL ROUTINE
+         DC.B     0                      PRINT LINES CONSTANT
+         DC.B     0                      WIDTH CONSTANT
+         DC.B     0                      NULL WAIT CONSTANT
+         DC.B     0                      SKIP LINES CONSTANT
+         DC.B     0                      PAUSE FLAG
+         DC.B     0                      DEPTH COUNTER
+DEFCOL   DC.B     0                      COLUMN COUNTER
+         DC.B     0                      BAUD RATE / 100
+         DC.B     $1A                    END-OF-FILE CHARACTER
+         DC.B     0                      X-OFF CHARACTER
+         DC.B     0                      X-ON CHARACTER
+         DC.B     0
+         DC.L     STATV1                 PTR TO GET STATUS 1 CHAR ONLY
+         DC.L     KINPV1                 PTR TO GET 1 CHAR ONLY
+         DC.L     KILLV1                 PTR TO KILL TYPEAHEAD
+         DC.L     0,0,0                  FOR FUTURE USE
+
+
+***** FOLLOWING NEEDED HERE BY CACHE *****
+CACFLG   DC.L     0                      RAMDISK ONLY AREA: 5AA51234 IF Y
+CACADD   DC.L     0                      MEM ADDRESS
+
+* FCS STORAGE, PUT HERE FOR BENEFIT OF BASIC
+FBAPTR   DC.L     0                      POINTER TO FIRST ACTIVE FCB
+BAREA    DS.B     64                     64 BYTES FOR USE BY BASIC ETC
+
+* ENVIRONMENT AREA FOR UNIX AND 'C' ADDICTS
+ENVRON   DC.B     'PROMPT=SK*DOS:',4,$0D 16 BYTES
+
+         DS.B     1008                   PLUS 1008 = 1024 = 1K
+
+* AN RTS WHICH IS USED BY DEVICE.COM
+         RTS
+
+* THE FOLLOWING IS HERE FOR JACK CRENSHAW'S JINK
+DATBEG   DC.L     0                   DATA AREA BEGINNING
+MEMBEG   DC.L     0                   MEMORY BEGINNING
+
+* ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+* ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+***** PRECEDING MUST REMAIN WHERE IS BECAUSE IT IS NEEDED *****
+***** BY OTHER ROUTINES AND PROGRAMS *****
+
+* THE FOLLOWING IS THE SYSTEM VARIABLE AREA
+
+         EVEN
+LINBU2   DC.L     $0D0D0D0D,$0D0D0D0D,$0D0D0D0D,$0D0D0D0D
+
+         DC.L     $0D0D0D0D,$0D0D0D0D,$0D0D0D0D,$0D0D0D0D
+
+         DC.L     $0D0D0D0D,$0D0D0D0D,$0D0D0D0D,$0D0D0D0D
+
+         DC.L     $0D0D0D0D,$0D0D0D0D,$0D0D0D0D,$0D0D0D0D
+
+         DC.L     $0D0D0D0D,$0D0D0D0D,$0D0D0D0D,$0D0D0D0D
+
+         DC.L     $0D0D0D0D,$0D0D0D0D,$0D0D0D0D,$0D0D0D0D
+
+         DC.L     $0D0D0D0D,$0D0D0D0D,$0D0D0D0D,$0D0D0D0D
+
+         DC.L     $0D0D0D0D,$0D0D0D0D,$0D0D0D0D,$0D0D0D0D
+
+BATFCB   DS.B     608 FCB FOR BATCH FILES
+DEVTMP   DS.B     1 TEMPORARY DEVICE NUMBER IN PERROR
+DEVNOW   DS.B     1 DEVICE NUMBER CURRENTLY ACTIVE
+DEVADD   DS.L     1 ADDRESS OF CURRENT DEVICE ENTRY IN DEVTAB
+DEFNAM   DC.B     'Default driver',4 DEFAULT DRIVER NAME
+
+INIFLG   DC.B     1 INIT FLAG - 1 DO INIT ON STARTUP
+ESDRET   DC.L     0 EXECSD RETURN ADDRESS
+ESUSTP   DC.L     0 EXECSD USER STACK POINTER
+ESSSTP   DC.L     0 EXECSD SYSTEM STACK POINTER
+OPCODE   DC.B     0 OPCODE IN FCS9 AND 10
+DIRTMP   DC.B     0 TEMPORARY DIR CHAR IN GETNAM
+FCBADD   DC.L     0 FCB ADDRESS
+ORETRY   DC.B     0 OUTER RETRY COUNTER
+IRETRY   DC.B     0 INNER RETRY COUNTER
+FCSJMP   DC.L     0 FCS TEMPORARY LOCATION
+EXSAVE   DC.B     0 EXTENSION CODE FOR GET
+SCFLAG   DC.B     0 SPACE COMPRESSION INDICATOR
+CHKSUM   DC.L     0 CHECKSUM FOR DISK NAME AND DATE
+DRTPTR   DC.L     0 DRIVE TABLE DATA POINTER
+DEFDRV   DC.B     0 DEFAULT DRIVE (WORKDR MOSTLY)
+DEFDIR   DC.B     0 DEFAULT DIRECTORY (WORK DIR MOSTLY)
+SAVLPT   DC.L     0 LPOINT MEMORY WHILE SCANNING FOR REDIRECTION
+LPTSAV   DC.L     0 LPOINT MEMORY DURING DOCMND
+SEQFLG   DC.W     0 SEQUENCE RESTART FLAG
+GETFLG   DC.B     0 GET FLAG: 0=CHECK LOAD LIMITS, 1=NO CHECK
+TPDFLG   DC.B     0 <>0 TO DISABLE TYPEAHEAD WHILE TRACING
+
+* THE FOLLOWING IS FCS STORAGE
+CURFCB   DC.L     0 ADDRESS OF CURRENT FCB
+
+* THE FOLLOWING IS FOR RANDOM FILES ONLY
+RANADD   DC.L     0 ADDR OF FCB
+FMDRV    DC.B     0 FILE MAP DRIVE
+CRNTMP   DC.W     0 TEMPORARY CURRENT RECORD NUMBER
+FMTRSE   DC.W     0 FILE MAP TR-SEC
+HDR2     DC.W     0 SECOND SECTOR HEADER
+HDR1     DC.L     0 FIRST SECTOR HEADER
+FILMAP   DS.B     504 LATEST FILE MAP
+BLANK3   DC.B     0,0,0 MUST BE AFTER FILMAP, DELIMITER
+FMP252   EQU      FILMAP+252 BEGINNING OF SECOND SECTOR
+FMP504   EQU      FILMAP+504 END OF SECOND SECTOR
+
+* THE FOLLOWING IS THE DRIVE DATA TABLE
+DRTABL   DC.W     0 DRIVE 0: DISK NAME/DATE CHECKSUM
+         DC.W     0 FIRST FREE T-S FROM SIR
+         DC.W     0 LAST FREE T-2
+         DC.W     0 NUMBER OF FREE SECTORS
+         DC.W     0 SAVE FOR MULTI USER
+         DS.B     90 SAME FOR 9 MORE DRIVES, TOTAL OF 10
+
+* THE FOLLOWING IS TO BE LOCATED INSIDE THE TWO
+* FCB'S SET ASIDE FOR INPIPE AND OUTPIPE, SO WE HAVE
+* TO TEMPORARILY STORE PROGRAM COUNTER IN CCEND
+
+CCEND    EQU      *                    STORE END OF DATA
+
+         ORG      OUTFCB
+
+*         LIB      1.TXINIT
+
+* EQUATES
+
+SDEXEC   EQU      $A01F
+
+* INITIALIZATION STAGE FOR SK-DOS
+
+* CLR INI FLAG SO THE NEXT COLDSTART
+* DOESN'T COME HERE ANY MORE
+
+SDINIT   CLR.B    INIFLG             WON'T CALL SDINIT FROM NOW ON
+
+* NOW SET CPU TYPE FLAG
+
+         MOVE.L   A7,D3             SAVE STACK POINTER
+         MOVE.L   $0010,D7          TEMP SAVE ILL INST VECTOR
+         LEA      CPUTRE(PC),A1        GET RETURN LOCATION
+         MOVE.L   A1,$0010          RESET VECTOR
+         CLR.B    CPUTYP             START ASSUMING 68000
+         DC.L     $4E7A0001           MOVEC SFC TO D0
+         MOVE.B   #$01,CPUTYP       IF OK, TRY 68010
+         DC.L     $4E7A0002           MOVEC CACR TO D0
+         MOVE.B   #$02,CPUTYP       IF OK, IS 68020
+CPUTRE   MOVE.L   D7,$0010          THEN RESTORE ILL INST VEC
+         MOVE.L   D3,A7             AND ALSO STACK
+
+* ROUTINE TO CHECK FOR END OF LOGICAL MEMORY
+
+         MOVE.L   BETRAP,A4         POINT TO BUS ERROR VECTOR
+         MOVE.L   (A4),D3           SAVE BUS ERROR VECTOR
+         LEA      ENDMEM,A5
+         MOVE.L   A5,(A4)           POINT THEM TO ENDMEM
+
+         MOVE.L   OFFINI,D0         POINT ABOVE SK-DOS
+         ADD.L    #$1000,D0          MOVE UP 4K
+         AND.L    #$FFFFF000,D0      AND THEN DOWN TO 4K BOUNDARY
+         MOVE.L   D0,A5
+         MOVE.L   #$55555555,D6
+         MOVE.L   #$AAAAAAAA,D7     TWO TEST PATTERNS
+MEMLOO   MOVE.L   (A5),D5           SAVE CONTENTS
+         MOVE.L   D6,(A5)           SAVE PATTERN 1
+         CMP.L    (A5),D6            COMPARE IT
+         BNE.S    ENDMEM             DIDN'T GO IN
+         MOVE.L   D7,(A5)           SAVE PATTERN 2
+         CMP.L    (A5),D7            COMPARE IT
+         BNE.S    ENDMEM             DIDN'T GO IN
+         MOVE.L   D5,(A5)           RESTORE OLD CONTENTS
+         ADD.L    #$1000,A5          GO UP 4K
+         CMP.L    MEMINI,A5          GONE TOO FAR?
+         BLS.S    MEMLOO             NO, GO BACK FOR MORE
+ENDMEM   MOVE.L   D3,(A4)           RESTORE BUS ERROR VECTOR
+         MOVE.L   A5,D6             ADDRESS WHICH DIDN'T WORK
+         AND.L    #$FFFFF000,D6      NEXT LOWER 4K BOUNDARY
+         SUB.L    #1,D6              TOP OF PREV 4K
+         MOVE.L   D6,MEMEND         SAVE AS TOP OF HIGH MEMORY
+
+         LEA      SIGNON,A4
+         JSR      PSTRNG               PRINT SIGN-ON MESSAGE
+
+* GET SIGNON DATE. DOES A JSR TO GETDAT VECTOR, WHICH IN TURN
+* BRINGS US BACK TO ASKDAT ROUTINE BELOW. USER CAN REPLACE THE
+* GETDAT VECTOR WITH A JMP TO HIS OWN ROUTINE
+         JSR      GETDAT               GO ASK FOR DATE
+
+* GO OPEN 'STARTUP.BAT' FILE
+         LEA      BATFCB(PC),A4        POINT TO BATCH FCB
+         MOVE.L   A4,CURFCB         SETUP CURRENT FCB
+         MOVE.L   STNAME,FCBNAM(A4) MOVE 'STARTUP' NAME INTO IT
+         MOVE.L   STNAME+4,FCBNAM+4(A4)
+         MOVE.W   STNAME+8,FCBNAM+8(A4)
+         MOVE.B   STNAME+10,FCBNAM+10(A4)
+         MOVE.B   SYSTDR,FCBDRV(A4) SELECT SYSTEM DRIVE
+         JSR      FCS1                 GO OPEN THE FILE FOR READING
+         BEQ.S    STRTOK             IF STARTUP.BAT WAS FOUND
+         MOVE.B   FCBERR(A4),D5     CHECK ERROR CODE
+         CMP.B    #4,D5              IS IT FILE NOT THERE?
+         BEQ.L    WARMS              YES, JUST WARMSTART
+         JMP      BATBAD
+
+* FOUND STARTUP.BAT FILE, GO DO IT
+STRTOK   JSR      FCS4                 IMMEDIATELY CLOSE IT AGAIN
+         BNE.L    BATBAD
+         MOVE.B   #1,FCBRW(A4)      MAKE DOS THINK IT'S OPEN
+         JMP      BATLOO               THEN DO AS ANY OTHER .BAT FILE
+
+* ASKDAT ROUTINE - CALLED VIA GETDAT ONLY IF USER HAS NOT
+* SUBSTITUTED HIS OWN ASKDAT ROUTINE
+ASKDAT   LEA      DATERQ,A4
+         JSR      PSTRNG               ASK FOR DATE
+         JSR      INLINE               INPUT DATE, SEPARATED BY COMMAS
+         MOVE.L   #MONTH,A0         POINT TO MONTH LOCATION
+         BSR.S    GTDATA GET MONTH
+         BSR.S    GTDATA GET DAY
+         BSR.S    GTDATA GET YEAR
+         LEA      THANKS,A4
+         JSR      PSTRNG               PRINT "THANK YOU"
+         JSR      PCRLF
+         RTS
+
+* GTDATA ROUTINE TO INPUT AND STORE DATE
+GTDATA   JSR      DECIN                GET NEXT DATE ITEM
+         BCC.S    DATEOK               OK NUMBER RECEIVED
+DATENG   ADD.L    #4,A7              REMOVE RETURN ADDRESS FROM STACK
+         BRA.S    ASKDAT             AND ASK FOR DATE AGAIN
+DATEOK   CMP.B    #99,D5               SHOULD BE LESS THAN 99
+         BHI.S    DATENG             ELSE IT'S NO GOOD
+         MOVE.B   D5,(A0)+          SAVE IT
+         RTS
+
+SIGNON   DC.B     $D,$A CR-LF
+         DC.B     '                  Welcome to'
+
+
+         DC.B     $D,$A
+         DC.B     '                  SK*DOS (R)'
+
+
+         DC.B     $D,$A
+         DC.B     '                 Version  3.3'
+
+
+         DC.B     $D,$A
+         DC.B     '   Copyright (C) 1986 - 1990 by Peter A. Stark'
+
+
+         DC.B     $D,$A
+		 DC.B     '  Adapted to 68K-MBC (C) 2025 by Philippe Roehr'
+
+
+         DC.B     $D,$A
+         DC.B     '         Star-K Software Systems Corp.'
+
+
+
+         DC.B     $D,$A,4
+DATERQ   DC.B     $D,$A
+         DC.B     "Please enter today's date (MM,DD,YY): "
+
+
+
+         DC.B     4
+DUMMY    DC.W     0                   GUARANTEES EVEN BOUNDARY FOR ..
+STNAME   DC.B     'STARTUP'           STARTUP.TXT FILE NAME
+         DC.B     0
+         DC.B     'BAT'
+THANKS   DC.B     'Thank you.',4
+
+
+         ORG      CCEND            CONTINUE FROM END OF DATA
+
+         EVEN
+
+*         LIB      1.TXTRAP           TRAP ENTRY POINTS
+* $AXXX TRAP ENTRY AND PROCESSING
+
+SDTRAP   MOVE.W   (A7),EXECSR         SAVE USER'S SR
+         CLR.B    ERRTYP               AND START WITH NO ERROR
+         CLR.L    D7                   CLEAR ALL OF D7
+
+*           AFTER A 1010 TRAP, THE STACKED PC POINTS TO THE
+*           1010 TRAP, RATHER THAN THE NEXT INSTRUCTION
+         ADD.L    #2,2(SP)             INCR PC TO NEXT INSTR
+
+         MOVE.L   2(SP),A6            GET PREV CONTENTS OF PC
+         MOVE.B   -1(A6),D7           CODE ALL BY ITSELF
+         BEQ.S    NOSVFC               DON'T SAVE CURFCB ON VPOINT
+         CMP.B    #30,D7
+         BCC.S    NOSVFC               OR CODES ABOVE 29
+         MOVE.L   A4,CURFCB           ELSE SAVE CURRENT FCB ADDRESS
+         MOVE.B   #1,INDOS            AND MARK US AS IN DOS
+
+NOSVFC   CMP.B    #69,D7               CHECK IF VALID
+         BHI.S    TRAPNG               IF TRAP CALL IS NG
+         ASL.L    #2,D7                MULT CODE BY 4
+         MOVE.L   #TRPTAB,A6          POINT A6 TO TABLE
+         MOVE.L   0(A6,D7),A6          POINT TO CALLED FUNCTION
+         JSR      (A6)                   GO DO IT
+
+* UPON RETURN FROM FUNCTION, CC CONTAINS POSSIBLE ERROR CODE
+* SO PUT IT ON USER'S STACK FOR RETURN TO HIM
+
+         MOVE.W   SR,D7               MOVE CCR TO D7 LOW BYTE
+         MOVE.B   D7,1(A7)            PUT CCR ON STACK
+         MOVE.L   #USRFCB,A6          ALWAYS POINT A6 TO USER AREA
+         CLR.B    INDOS                NO LONGER IN DOS
+         RTE      AND RETURN TO HIM
+
+* FOR INVALID TRAP AX CALL, PRINT ERROR MESSAGE AND RETURN TO DOS
+
+TRAPNG   MOVE.L   #USRFCB,A4          POINT TO AN FCB
+         MOVE.B   #110,FCBERR(A4)     PUT ERROR 110 INTO IT
+         JSR      PERROR                 GO PRINT ERROR MESSAGE
+         JMP      WARMS                  AND RETURN TO SK*DOS
+
+* TRAP FUNCTION TABLE.
+
+TRPTAB   DC.L     TRPRTS             00 RET PTR TO VAR AREA IN A5
+         DC.L     FREADO             01 READ BYTE FROM FILE
+         DC.L     FWRITO             02 WRITE BYTE TO FILE
+         DC.L     TRAPNG             03
+         DC.L     TRAPNG             04
+         DC.L     FCS1               05 FOPENR
+         DC.L     FCS2               06 FOPENW
+         DC.L     FCS3               07 FOPENU
+         DC.L     FCS4               08 FCLOSE
+         DC.L     FCSCLS             09
+         DC.L     FCS5               10 FREWIN
+         DC.L     FCS6               11 DIROPN
+         DC.L     FCS16              12 SISOPN
+         DC.L     FCS7               13 DSREAD
+         DC.L     FCS11              14 DSWRIT
+         DC.L     FCS12              15 FDELET
+         DC.L     FCS13              16 FRENAM
+         DC.L     FCS15              17 FSKIP
+         DC.L     FINDEV             18 FIND DEVICE FROM NAME
+         DC.L     TRAPNG             19
+         DC.L     FCS23              20 FRRECD
+         DC.L     FCS22              21 FRBACK
+         DC.L     FCS17              22 FRGET
+         DC.L     FCS18              23 FRPUT
+         DC.L     TRAPNG             24
+         DC.L     TRAPNG             25
+         DC.L     FCS20              26 FDRIVE
+         DC.L     FCSINI             27 FCS INITIALIZE
+         DC.L     FCS9               28 SREAD SECTOR READ
+         DC.L     FCS10              29 SWRITE SECTOR WRITE
+
+* SAVE CURFCB FOR ALL ABOVE, EXCEPT VPOINT (0)
+* DON'T SAVE IT FOR ALL BELOW
+
+         DC.L     WARMS              30
+         DC.L     EXECSD             31
+         DC.L     RESIO              32
+         DC.L     RESTRP             33 RESET TRAP VECTORS
+         DC.L     LOAD               34
+         DC.L     GETNAM             35
+         DC.L     DEFEXT             36
+         DC.L     RENTER             37 RE-ENTER DOS
+         DC.L     DIREPH             38 DISK RESTORE (1ST LOG TO PHYS)
+         DC.L     DISEPH             39 DISK SEEK (DITTO)
+         DC.L     ICNTRS             40 INPUT CONTROL SELECT
+         DC.L     GETCHS             41
+         DC.L     KINPUS             42 GETCHN GETCH W/O ECHO
+         DC.L     STATVS             43
+         DC.L     INLINE             44
+         DC.L     GETNX              45
+         DC.L     CLASF              46
+         DC.L     HEXIN              47
+         DC.L     DECIN              48
+         DC.L     TOUPPR             49 CONVERT D5 FROM LOWER TO UPPER CASE
+         DC.L     OCNTRS             50 OUTPUT CONTROL SELECT
+         DC.L     PUTCHS             51
+         DC.L     PCRLF              52
+         DC.L     PSTRNG             53 PSTRNG
+         DC.L     PDATA              54 PNSTRN
+         DC.L     PERROR             55
+         DC.L     OUT5D              56
+         DC.L     OUT10D             57
+         DC.L     OUT2H              58
+         DC.L     OUT4H              59
+         DC.L     OUT8H              60
+         DC.L     OSTATS             61 CHECK OUTPUT DEVICE STATUS
+         DC.L     SEENXT             62 LOOK AT NEXT CHAR W/O GET
+         DC.L     GETDTV             63 GET DATE AND TIME
+         DC.L     INTOFF             64 TURN OFF INTERRUPTS
+         DC.L     INTBON             65 INTERRUPTS BACK ON
+         DC.L     STATU1             66 STATUS 1 CHAR ONLY
+         DC.L     KINPU1             67 KBD IN 1 CHAR ONLY
+         DC.L     KILLU1             68 KILL TYPEAHEAD BUFFER
+         DC.L     FNPRNT             69 PRINT FILE NAME
+
+* DUMMY RTS FOR VPOINT
+
+TRPRTS   RTS      AND RETURN
+
+* OTHER EXCEPTION VECTORS, USED ONLY IF TRPFLG<>0.
+
+OTRAPS   BSR.S    EXCEPT             2 = BUS ERROR
+         BSR.S    EXCEPT             3 = ADDRESS ERROR
+         BSR.S    EXCEPT             4 = ILLEGAL INSTRUCTION
+         BSR.S    EXCEPT             5 = ZERO DIVIDE
+         BSR.S    EXCEPT             6 = CHK INSTRUCTIN
+         BSR.S    EXCEPT             7 = TRAPV INSTRUCTION
+         BSR.S    EXCEPT             8 = PRIVILEGE VIOLATION
+         BSR.S    EXCEPT             9 = TRACE
+         BSR.S    EXCEPT             10 = UNUSED ($AXXX)
+         BSR.S    EXCEPT             11 = LINE 1111 EMULATOR
+         BSR.S    EXCEPT             12 = UNASSIGNED, RESERVED
+         BSR.S    EXCEPT             13 = UNASSIGNED, RESERVED
+         BSR.S    EXCEPT             14 = FORMAT ERROR
+         BSR.S    EXCEPT             15 = UNINITIALIZED INTERRUPT
+         BSR.S    EXCEPT             16 = UNASSIGNED RESERVED 0
+         BSR.S    EXCEPT             17 = UNASSIGNED RESERVED 1
+         BSR.S    EXCEPT             18 = UNASSIGNED RESERVED 2
+         BSR.S    EXCEPT             19 = UNASSIGNED RESERVED 3
+         BSR.S    EXCEPT             20 = UNASSIGNED RESERVED 4
+         BSR.S    EXCEPT             21 = UNASSIGNED RESERVED 5
+         BSR.S    EXCEPT             22 = UNASSIGNED RESERVED 6
+         BSR.S    EXCEPT             23 = UNASSIGNED RESERVED 7
+         BSR.S    EXCEPT             24 = SPURIOUS INTERRUPT
+         BSR.S    EXCEPT             25 = LEVEL 1 INTERRUPT
+         BSR.S    EXCEPT             26 = LEVEL 2 INTERRUPT
+         BSR.S    EXCEPT             27 = LEVEL 3 INTERRUPT
+         BSR.S    EXCEPT             28 = LEVEL 4 INTERRUPT
+LVL5IA   BSR.S    EXCEPT             29 = LEVEL 5 INTERRUPT
+         BSR.S    EXCEPT             30 = LEVEL 6 INTERRUPT
+         BSR.S    EXCEPT             31 = LEVEL 7 INTERRUPT
+         BSR.S    EXCEPT             32 = TRAP 0
+         BSR.S    EXCEPT             33 = TRAP 1
+         BSR.S    EXCEPT             34 = TRAP 2
+         BSR.S    EXCEPT             35 = TRAP 3
+         BSR.S    EXCEPT             36 = TRAP 4
+         BSR.S    EXCEPT             37 = TRAP 5
+         BSR.S    EXCEPT             38 = TRAP 6
+         BSR.S    EXCEPT             39 = TRAP 7
+         BSR.S    EXCEPT             40 = TRAP 8
+         BSR.S    EXCEPT             41 = TRAP 9
+         BSR.S    EXCEPT             42 = TRAP 10
+         BSR.S    EXCEPT             43 = TRAP 11
+         BSR.S    EXCEPT             44 = TRAP 12
+         BSR.S    EXCEPT             45 = TRAP 13
+         BSR.S    EXCEPT             46 = TRAP 14
+         BSR.S    EXCEPT             47 = TRAP 15
+         BSR.S    EXCEPT             48-63 = UNASSIGNED, RESERVED
+         BSR.S    EXCEPT             64-255 = USER INTERRUPTS
+         NOP
+
+* PROCESSING FOR ABOVE EXCEPTION VECTORS. ON ENTRY, THE RETURN
+* ADDRESS (ON STACK) POINTS TO LOCATION PAST THE JSR
+
+EXCEPT   MOVE.L   (A7)+,D7          GET RETURN ADDRESS
+         SUB.L    #2,D7              POINT TO JSR
+         SUB.L    #OTRAPS,D7         SUBTRACT STARTING ADDRESS
+         LSR.L    #1,D7              CONVERT TO NUMBER 0-47
+         ADD.B    #102,D7            ERROR 102-149
+         LEA      USRFCB,A4            POINT TO USER FCB
+         MOVE.B   D7,FCBERR(A4)     PUT INTO FCB
+         JSR      PERROR               GO PRINT ERROR MESSAGE
+         JMP      WARMS                AND RETURN TO SK*DOS
+
+         EVEN
+
+*         LIB      1.TXCMDPRO
+
+* COMMAND PROCESSOR CODE FOLLOWS
+
+COLDS    MOVE.L   #STACK,A7         INIT DOS STACK POINTER
+         MOVE.L   #USTACK,A6        INIT USER STACK POINTER
+         MOVE.L   A6,USP
+         MOVE.W   SR,D7             SR UPON ENTRY
+         AND.W    #$0700,D7          RETAIN ONLY IRQ BITS
+         MOVE.W   D7,EXECSR         SAVE AS EXECUTION SR
+         MOVE.B   #1,INDOS          MARK THAT WE'RE IN DOS
+         CLR.B    FOTHER             DRIVERS = SK*DOS FORMAT
+         JSR      SINITV               INITIALIZE SERIAL PORT
+         JSR      DICOLD               INIT PRIMARY DISK DRIVERS
+         JSR      SECCOL               INIT SECONDARY DRIVERS
+         JSR      RESIO                RESET I/O VECTORS
+         JSR      RESTRP               RESET TRAP VECTORS
+         JSR      RESDEV               RESET COMPLETE DEVICE TABLE
+         MOVE.L   #0,FBAPTR         ERASE FILE LIST POINTER
+         CLR.B    CMFLAG             FORCE EXTERNAL EXECSD FLAG OFF
+         CLR.B    XFERFL             NO TRANSFER ADDRESS LOADED
+         CLR.B    GETFLG             GET DEFAULTS TO CHECK LIMITS
+         JSR      FCSINI               INITIALIZE FCS SYSTEM
+         BRA.L    WARMS2
+
+* RE-ENTER WARMSTART VIA TRAP TO MAKE SURE THAT WE'RE IN
+* SUPERVISOR STATE
+
+WARMVT   MOVE.L   $BC,D0            SAVE PRESENT TRAP 15 VECTOR
+         LEA      WARVT1,A0            POINT TO REENTRY
+         MOVE.L   A0,$BC            SAVE AS NEW VECTOR
+         TRAP     #15                 NOW TRAP
+WARVT1   MOVE.L   D0,$BC            RESTORE ORIGINAL TRAP 15
+         JSR      SINITV               INITIALIZE SERIAL PORT
+* NOW DROP THROUGH TO ACTUAL WARMS
+
+WARMS    CLR.W    TRMASK             NORMALLY NO TRACE MODE
+WARMTR   MOVE.L   #WARMSV,BREAK     INITIALIZE ESCAPE RETURN
+         MOVE.L   #USTACK,A6        INIT USER STACK POINTER
+         MOVE.L   A6,USP
+         MOVE.B   #5,NRETRY         SET FOR 5 RETRIES ON DISK
+         CLR.B    FOTHER             DRIVERS = SK*DOS FORMAT
+         JSR      RESIO                RESET I/O VECTORS
+         JSR      RESTRP               RESET TRAP VECTORS
+         JSR      RESDV1               PARTIAL RESET DEVICE TABLE
+         MOVE.L   OFFINI,D5         GET "END OF SK*DOS" ADDRESS
+         ADD.L    #$00FF,D5          SET OFFSET TO 256W BOUNDARY
+         AND.L    #$FFFFFF00,D5      ... PAST THE END OF SK*DOS
+         MOVE.L   D5,OFFSET
+         MOVE.B   LASTRM,D5         PREVIOUS LAST TERMINATOR
+         CMP.B    ENDLIN,D5          DOING MORE COMMAND?
+         BNE.S    WARMS1               NO, JUST WARMS
+WARMS0   MOVE.L   LPOINT,D5
+         ADD      #1,D5                STEP PAST TERMINATOR
+         MOVE.L   D5,LPOINT
+         BRA.L    MLOOP1             AND GO PROCESS IT
+
+WARMS1   TST.B    CMFLAG             CHECK IF AN EXTERNAL EXECSD USED
+         BEQ.S    WARMS2             NO, SO DO IT NORMALLY
+         CLR.B    CMFLAG             YES, SO CLEAR FOR NEXT TIME
+         MOVE.L   LPTSAV,A6
+         MOVE.L   A6,LPOINT         RESTORE LINE POINTER
+         MOVE.L   ESUSTP,A6
+         MOVE.L   A6,USP            RESET USER'S STACK POINTER
+         MOVE.L   ESSSTP,A7         RESET SYSTEM STACK POINTER
+         MOVEM.L  (A7)+,D0-D4/A0-A4 RESTORE ALL REGISTERS
+         MOVE.B   ERRTYP,D5
+         RTS      AND RETURN TO TRAP ROUTINE
+
+WARMS2   MOVE.L   #STACK,A7         INIT DOS STACK POINTER
+         JSR      DIWARM               WARM-RESET DISK DRIVERS
+         JSR      SECWAR
+         MOVE.L   OFFINI,D6         GET "END OF SK*DOS" ADDRESS
+         ADD.L    #$00FF,D6          SET OFFSET TO 256W BOUNDARY
+         AND.L    #$FFFFFF00,D6      ... PAST THE END OF SK*DOS
+         MOVE.L   D6,OFFSET
+         CLR.B    ERRTYP             NO ERRORS SO FAR
+         CLR.B    GETFLG             GET DEFAULTS TO CHECK LIMITS
+         MOVE.B   WORKDR,DEFDRV     DRIVE USUALLY DEFAULTS TO WORK DRIVE
+         MOVE.B   WRKDIR,DEFDIR     AND DIRECTORY ALSO
+         JSR      FCSCLS               CLOSE ALL FILES
+         MOVE.B   #$FF,INECHO       ENABLE KEYBOARD ECHO
+         MOVE.W   #$0D0D,CURRCH     CURR & PREV CHAR ARE BOTH CR
+         TST.B    INIFLG             CHECK WHETHER TO INITIALIZE
+         BEQ.S    MLOOP              NO IF =0
+         JSR      SDINIT               YES ON INITIAL BOOT ONLY
+
+* MAIN COMMAND LOOP
+
+MLOOP    MOVE.B   CPUTYP,D5         CHECK CPU TYPE
+         CMP.B    #2,D5              IS IT 68020?
+         BNE.S    MLOOP0             NO, CONTINUE
+         MOVE.L   #$8,D5            YES, DISABLE AND CLEAR CACHE
+         DC.L     $4E7B5002           MOVEC.L D5,CCR
+         MOVE.L   #$1,D5            THEN ENABLE IT
+         DC.L     $4E7B5002           MOVEC.L D5,CCR
+MLOOP0   MOVE.L   #PROMPT,A4
+         JSR      PSTRNG               PRINT PROMPT
+         MOVE.B   #1,INDOS          MARK THAT WE'RE IN DOS
+         LEA      LINBU2(PC),A4
+         LEA      LINBUF(PC),A5
+         MOVE.W   #31,D5
+MTLBUF   MOVE.L   (A4)+,(A5)+       RESTORE LINE BUFFER
+         DBRA     D5,MTLBUF
+         JSR      INLINE               INPUT COMMAND
+         LEA      LINBUF(PC),A4
+         LEA      LINBU2(PC),A5
+         MOVE.W   #31,D5
+MFLBUF   MOVE.L   (A4)+,(A5)+       SAVE LINE BUFFER
+         DBRA     D5,MFLBUF
+MLOOP1   MOVE.L   LPOINT,A5
+RENTER   EQU      MLOOP1               RE-ENTRY ENTRY POINT
+         MOVE.B   (A5),D5           GET FIRST CHAR IN LINE
+         CMP.B    #$0D,D5            CR?
+         BEQ.S    MLOOP              YES, SO NOTHING WAS ENTERED
+         CMP.B    #$20,D5            SPACE?
+         BEQ      WARMS0               STEP OVER IT
+         BRA.S    DOCMN0             EXECUTE COMMAND
+
+
+EXECSD   MOVEM.L  D0-D4/A0-A4,-(A7) EXTERNAL ENTRY POINT
+         MOVE.B   #1,CMFLAG
+         MOVE.L   USP,A6
+         MOVE.L   A6,ESUSTP         SAVE USER'S STACK POINTER
+         MOVE.L   A7,ESSSTP         SAVE SYSTEM STACK POINTER
+         MOVE.L   LPOINT,A6
+         MOVE.L   A6,LPTSAV         SAVE ORIGINAL LPOINT
+         MOVE.L   A4,LPOINT         POINTS TO COMMAND
+DOCMN0   CLR.B    ERRTYP             ERASE ERROR CODE
+         MOVE.L   LPOINT,A5         POINT X TO NEXT CHAR IN LINBUF
+         JSR      SKIPSP               SKIP SPACES
+         CMP.B    #$0D,D5            IS IT CR?
+         BEQ.S    DOCMER             YES, SO ERROR
+         CMP.B    ENDLIN,D5          END LINE?
+         BNE.S    DOCMN2             NO, SO CONTINUE
+
+DOCMER   MOVE.B   #26,ERRTYP        COMMAND SYNTAX ERROR
+         BRA      DOQUIT               COPY ERROR CODE AND QUIT
+
+DOCMN2   MOVE.L   LPOINT,SAVLPT     SAVE LINE POINTER
+
+* AT THIS POINT, SCAN COMMAND LINE FOR > OR < REDIRECTION
+
+SCANLO   MOVE.L   LPOINT,A0         FIRST CHAR IN LINE
+SCNLO1   MOVE.B   (A0)+,D5          GET NEXT CHARACTER
+         CMP.B    #$3C,D5            < ?
+         BEQ.S    INPIPE             YES, GO DO INPIPE
+         CMP.B    #$3E,D5            > ?
+         BEQ.L    OUTPIP             YES, GO DO OUTPIPE
+         CMP.B    #$0D,D5            CR?
+         BEQ.L    NOREDI             YES, NO REDIRECTION
+         CMP.B    ENDLIN,D5          END LINE?
+         BEQ.L    NOREDI             YES, NO REDIRECTION
+         BRA.S    SCNLO1             ELSE GO LOOK SOME MORE
+* FOR INPUT REDIRECTION:
+INPIPE   MOVE.L   A0,LPOINT         LPOINT TO BEGINNING OF NAME
+         LEA      INFCB(PC),A4         POINT TO IN FCB
+         JSR      GETNAM               GET THE FILE/DEVICE NAME
+         BCS.S    DOCMER             NAME ERROR
+         MOVE.B   #14,D4            DEFAULT TO .PIP
+         JSR      DEFEXT
+         MOVE.B   FCBDRV(A4),D4     DRIVE NUMBER
+         SUB.B    #$10,D4            CHECK IF DRIVE OR DEVICE
+         BHI.S    ISINDV             IF IT'S AN IN DEVICE
+         MOVE.L   A4,CURFCB
+         CLR.B    ERRTYP
+         JSR      FCS1                 ELSE OPEN FILE
+         BNE.S    DOCMER             IF ERROR
+         MOVE.L   A4,FIADDR         INPUT FILE ADDRESS
+         MOVE.B   #8,DEVIN          INPUT DEVICE = 8
+         BRA.S    REMOVE             AND THEN REMOVE NAME FROM LINE
+ISINDV   MOVE.B   D4,DEVIN          INPUT DEVICE = DRIVE-$10
+REMOVE   SUB.L    #1,A0              POINT TO GT/LT SIGN
+         CMP.L    #LINBUF,A0         AT BEGINNING OF LINE BUFFER?
+         BEQ.S    REMOV1             YES, SO USE AS IS
+         CMP.B    #$20,-1(A0)        PRECEDED BY SPACE?
+         BEQ.S    REMOV0             YES, REMOVE THAT TOO
+         CMP.B    #$2C,-1(A0)        PRECEDED BY COMMA?
+         BNE.S    REMOV1             NO, SO USE AS IS
+REMOV0   LEA      -1(A0),A0            BACKUP TO SPACE OR COMMA
+REMOV1   MOVE.L   LPOINT,A1         AND PAST THE FILE NAME
+REMOLO   MOVE.B   (A1)+,(A0)+       MOVE A BYTE OVER
+         CMP.L    #LINBUF+128,A1     DONE?
+         BNE.S    REMOLO             NO
+         MOVE.L   SAVLPT,LPOINT     RESTORE LINE POINTER
+         BRA.L    SCANLO             AND THEN LOOK SOME MORE
+
+* FOR OUTPUT REDIRECTION:
+OUTPIP   MOVE.L   A0,LPOINT         LPOINT TO BEGINNING OF NAME
+         LEA      OUTFCB(PC),A4        POINT TO OUT FCB
+         JSR      GETNAM               GET THE FILE/DEVICE NAME
+         BCS.L    DOCMER             NAME ERROR
+         MOVE.B   #14,D4            DEFAULT TO .PIP
+         JSR      DEFEXT
+         MOVE.B   FCBDRV(A4),D4     DRIVE NUMBER
+         SUB.B    #$10,D4            CHECK IF DRIVE OR DEVICE
+         BCC.S    ISOUTD             IF IT'S AN OUT DEVICE
+         MOVE.L   A4,CURFCB
+         CLR.B    ERRTYP
+         JSR      FCS2                 ELSE OPEN FILE
+         BNE.L    DOCMER             IF ERROR
+         MOVE.L   A4,FOADDR         OUTPUT FILE ADDRESS
+         MOVE.B   #8,DEVOUT         OUTPUT DEVICE = 8
+         BRA.L    REMOVE             AND THEN REMOVE NAME FROM LINE
+ISOUTD   MOVE.B   D4,DEVOUT         OUTPUT DEVICE = DRIVE-$10
+         BRA.L    REMOVE             AND THEN REMOVE NAME FROM LINE
+
+* FINISHED SCANNING FOR REDIRECTION - CONTINUE
+NOREDI   MOVE.L   SAVLPT,LPOINT     RESTORE LINE POINTER
+         MOVE.L   #USRFCB,A4
+         JSR      GETNAM               MOVE COMMAND INTO FCB NAME
+         BCS.L    DOCMER             ERROR 26 IF NG
+         MOVE.L   USRTAB,D5         ELSE TRY USER'S COMMAND TABLE
+         BEQ.S    NOUSER NONE IF 0
+         MOVE.L   D5,A5             MOVE POINTER INTO INDEX
+         BSR.S    TRYMEM
+         BEQ.S    CMDOK              IF WE FOUND ONE
+NOUSER   MOVE.L   #CMDTAB,D5        POINT TO OUR CMD TABLE
+         MOVE.L   D5,A5             MOVE POINTER INTO INDEX
+         BSR.S    TRYMEM             FIND MEMORY RESIDENT
+         BEQ.S    CMDOK              IF WE FOUND ONE
+         MOVE.L   SAVLPT,LPOINT     IF NOT, RESTORE LPOINT
+         BRA.S    TRYDSK             TRY DISK RESIDENT
+
+* IF A COMMAND IS FOUND IN COMMAND TABLE DO IT
+CMDOK    MOVE.L   (A5),A5           GET ADDRESS INTO A5
+         JSR      (A5)                 GO VIA ITS ADDRESS
+         BRA.L    DOQUIT             GET ANY ERROR AND RETURN
+
+* TRY TO FIND MEMORY-RESIDENT COMMAND
+TRYMEM   MOVE.L   #USRFCB+FCBNAM,A6 POINT TO PARSED COMMAND
+         CLR.L    D5
+         MOVE.B   (A5),D5           CHECK FIRST BYTE
+         BEQ.S    TMNOTF             ZERO MEANS END OF TABLE
+TMLOOP   MOVE.B   (A5)+,D5          NEXT CHAR IN TABLE
+         MOVE.B   D5,D7
+         SUB.B    (A6)+,D7           COMP WITH COMMAND'S NEXT
+         AND.B    #$7F,D7            DELETE PARITY BIT
+         BNE.S    TMDIFF             IF DIFFERENT
+         TST.B    D5                 IF SAME, CHECK FOR END
+         BNE.S    TMLOOP             NOT END, KEEP GOING
+TMADJ    MOVE.L   A5,D5             IF A5 IS ODD, MUST ADJUST IT
+         ADD.L    #1,D5              MOVE UP BY 1 BYTE
+         AND.B    #$FE,D5            IF NOW ODD, CHANGE BACK TO EVEN
+         MOVE.L   D5,A5             RETURN TO A5
+         CLR.B    D5                 SET ZERO IF EXITING
+         RTS      EXIT IF SAME, A5-> ADDRESS
+
+* IF CHARS DON'T MATCH, OK IF Y POINTS PAST NAME
+TMDIFF   CMP.L    #USRFCB+FCBEXT,A6  PAST NAME TO EXTENSION?
+         BEQ.S    TMADJ              YES, COMMAND MUST BE SAME
+* IF NOT, COMMANDS ARE DIFFERENT - STEP TO NEXT
+TMSTEP   TST.B    D5                 IS A5-> COMMAND'S ADDRESS (PAST 0)
+         BEQ.S    TMADDR             YES, STEP OVER IT
+         MOVE.B   (A5)+,D5          NO, GO TO NEXT
+         BRA.S    TMSTEP
+TMADDR   ADD.L    #4,A5              AT ADDRESS, STEP OVER IT
+         BSR.S    TMADJ              ADJUST A5 IF ODD
+         BRA.S    TRYMEM             AND TRY FOR NEXT COMMAND
+
+* FINALLY, IF NOTHING FOUND SET NONZERO & EXIT
+TMNOTF   ADD.B    #01,D5             CLEAR Z FLAG
+         RTS      RTS
+
+* IF MEMORY-RESIDENT COMMAND NOT FOUND, ASSUME DISK-RESIDENT
+
+TRYDSK   MOVE.B   #2,EXSAVE         DEFAULT TO COM EXTENSION
+         MOVE.B   SYSTDR,DEFDRV     USE SYS DRIVE ON COMMANDS ONLY
+         MOVE.B   SYSDIR,DEFDIR     AND DIRECTORY ALSO
+         CLR.B    ERRTYP             NO ERRORS SO FAR
+         CLR.B    GETFLG             GET DEFAULTS TO CHECK LIMITS
+         BSR.L    GET0               ATTEMPT TO DO A GET
+         BNE.S    TRYBAT             IF ERROR, TRY BATCH
+XEQ      CLR.B    EXSAVE             DEFAULT TO BIN EXTENSION AGAIN
+         TST.B    XFERFL             IS THERE A VALID EXECUTION ADDRESS?
+         BEQ.S    NOEXAD             NO EXECUTION ADDRESS
+         JSR      DIMOFF               TURN OFF DISK MOTOR
+         SUB.L    #8,A7              MAKE ROOM ON STACK
+         MOVE.L   EXECAD,2(A7)      PUT EXEC ADDRESS ON IT
+         MOVE.W   EXECSR,D7         USER SR
+         OR.W     TRMASK,D7           MAYBE OR IN TRACE BIT
+         AND.W    #$DFFF,D7          FORCE USER MODE
+         MOVE.W   D7,(A7)           PUT USER SR ON STACK
+         CLR.W    6(A7)              CLEAR 68010/20 FORMAT
+         MOVE.L   #USTACK,A6        INIT USER STACK POINTER
+         MOVE.L   A6,USP
+         MOVE.L   #USRFCB,A6        GIVE USER CORRECT A6
+         CLR.B    INDOS              CLEAR IN DOS FLAG
+         RTE      AND GO DO DISK COMMAND
+
+NOEXAD   MOVE.B   #28,ERRTYP        NO TRANSFER ADDRESS ERROR
+DOQUIT   LEA      USRFCB(PC),A4        PUT ERROR CODE IN USER FCB
+         MOVE.B   ERRTYP,FCBERR(A4)
+         BSR      PERROR               PRINT ERROR
+DOEXIT   JMP      WARMS                AND RETURN
+
+* IF NOT .CMD FILE, TRY BATCH FILE
+
+TRYBAT   LEA      USRFCB(PC),A0
+         LEA      BATFCB(PC),A4
+         MOVE.B   FCBDRV(A0),FCBDRV(A4)
+         MOVE.L   FCBNAM(A0),FCBNAM(A4) COPY OVER DRIVE AND NAME
+         MOVE.L   FCBNAM+4(A0),FCBNAM+4(A4)
+         MOVE.L   #$42415400,FCBNAM+8(A4) AND .BAT EXTENSION
+         MOVE.L   A4,CURFCB
+         CLR.B    ERRTYP             NO ERRORS SO FAR
+         JSR      FCS1                 TRY TO OPEN FOR READ
+         BNE.L    BAFNTF
+         JSR      FCS4                 RIGHT AWAY CLOSE AGAIN
+         BNE.L    BAQUIT
+         MOVE.B   #1,FCBRW(A4)      BUT MAKE DOS THINK IT'S OPEN
+* NOW LOOP ONCE FOR EACH LINE IN BATCH FILE
+BATLOO   LEA      BATFCB(PC),A4
+         MOVE.L   A4,CURFCB
+         LEA      LINBUF(PC),A0        POINT TO LINE BUFFER
+         MOVE.L   A0,LPOINT
+BATRLP   CLR.B    ERRTYP
+         JSR      FREAD                READ BYTE FROM FILE
+         BNE.L    BATERR
+         MOVE.B   D5,(A0)+          BUT INTO LINE BUFFER
+         CMP.B    #$0D,D5            END OF LINE?
+         BEQ.S    BATLEN             YES
+         CMP.B    #$20,D5            CHECK FOR CONTROL CHARS
+         BCC.S    BATRLP             NOT CNTRL, SO IS OK
+         LEA      FTYMSG(PC),A4        IF CONTROL, THEN WRONG FILE TYPE
+         JSR      PSTRNG               PRINT "NOT TEXT FILE"
+         JMP      WARMS                AND QUIT
+FTYMSG   DC.B     'ERROR - .BAT file is not a text file.',4
+
+
+
+
+BATLEN   LEA      LINBUF(PC),A4        POINT TO LINE BUFFER
+         DC       SDEXEC                GO EXECUTE THE COMMAND
+         BNE.S    BATBAD
+         TST.B    D5                 CHECK IF ERROR CODE IN D5
+         BNE.S    BATBAD             IF ERROR
+         JSR      FCSCLS               CLOSE FILES JUST IN CASE
+         BRA.S    BATLOO             THEN REPEAT
+BATBAD   LEA      EXEMSG(PC),A4        ON ERROR, PRINT
+         JSR      PSTRNG               ..."BATCH EXECUTION ERROR"
+BAQUIT   LEA      BATFCB(PC),A4
+         MOVE.B   ERRTYP,BATFCB+FCBERR
+         BSR      PERROR               PRINT ERROR, IF ANY
+         JMP      WARMS                AND QUIT
+BAFNTF   CLR.B    FCBEXT(A4)         ERASE EXTENSION
+         BRA.S    BAQUIT
+
+EXEMSG   DC.B     '.BAT file execution error - aborting execution.',4
+
+
+
+
+
+BATERR   MOVE.B   FCBERR(A4),D7     CHECK ERROR TYPE
+         CMP.B    #8,D7              END OF FILE?
+         BEQ.L    WARMS              YES, JUST QUIT
+         BRA.S    BATBAD             ELSE REPORT IT
+
+CMDTAB   DC.B     'TRACE***' START TRACING COMMAND
+         DC.B     0
+         DC.L     TRACON
+         DC.B     'DIR' PRINT DISK DIRECTORY
+         DC.B     0
+         DC.L     DIR
+         DC.B     'GET' GET ML PROGRAM INTO MEMORY, CHECK LIMITS
+         DC.B     0
+         DC.L     GET
+         DC.B     'GETX' GET ML PROGRAM INTO MEMORY, NO CHECK
+         DC.B     0
+         DC.L     GETX
+         DC.B     'MON' RE-ENTER BACK TO MONITOR
+         DC.B     0
+         DC.L     GOMONI
+         DC.B     'RESET' RESET MONITOR/SYSTEM
+         DC.B     0
+         DC.L     GORESE
+         DC.B     'SAVE' SAVE BINARY FILE TO DISK
+         DC.B     0
+         DC.L     SAVE
+         DC.B     'XEQ' EXECUTE LAST LOADED PROGRAM
+         DC.B     0
+         DC.L     XEQ
+
+         DC.B     0 END OF TABLE FLAG
+
+* MAKE SURE TO CLEAR INDOS BEFORE GOING TO MONITOR
+GOMONI   CLR.B    INDOS
+         JMP      MONITV
+GORESE   CLR.B    INDOS
+         JMP      RESETV
+
+* TRACON COMMAND - SET EXECSR SO USER PROGRAM GOES TO TRACE
+
+TRACON   MOVE.W   #$8000,TRMASK     WILL LATER BE ORRED IN
+         MOVE.B   #1,TPDFLG         DISABLE TYPEAHEAD DURING/AFTER
+         JMP      WARMTR               AND CONTINUE
+
+* GET COMMAND - GET MACHINE LANGUAGE PROGRAM FROM
+* DISK INTO MEMORY, STORE EXECUTION ADDRESS IN
+* EXECAD, AND PRINT ERROR MESSAGE ON ERROR.
+* GET AND GET0 DEFAULT TO CHECK LOAD LIMITS - DO NOT ALLOW
+* LOAD BELOW OFFSET, OR ABOVE MEMEND. GETX DOES NOT CHECK LIMITS.
+
+GETX     MOVE.B   #1,GETFLG         SET FLAG SO NO CHECKING IS DONE
+GET      CLR.B    EXSAVE             DEFAULT TO BIN FOR GET
+GET0     MOVE.L   #USRFCB,A4        POINT TO USR FCB
+         JSR      GETNAM               MOVE FILE NAME TO FCB
+         BCS      GETHLP               IF NAME SEEMS BAD
+
+GET1     CLR.L    D5
+         MOVE.B   EXSAVE,D4         GET EXTENSION TO BE USED
+         JSR      DEFEXT               DEFAULT TO BIN OR COM EXTENSION
+         CLR.B    ERRTYP
+         MOVE.L   A4,CURFCB
+         JSR      FCS1                 GO OPEN FILE FOR READ
+         BNE      GETEXI               GO REPORT ERROR
+
+LOAD     MOVE.B   CPUTYP,D5         CHECK CPU TYPE
+         CMP.B    #2,D5              IS IT 68020?
+         BNE.S    LOAD0              NO, CONTINUE
+         MOVE.L   #$8,D5            YES, DISABLE AND CLEAR CACHE
+         DC.L     $4E7B5002           MOVEC.L D5,CCR
+         MOVE.L   #$1,D5            THEN ENABLE IT
+         DC.L     $4E7B5002           MOVEC.L D5,CCR
+LOAD0    MOVEM.L  D1-D2/A2/A4,-(A7)
+         MOVE.L   #USRFCB,A4
+         CLR.B    ERRTYP
+         MOVE.L   A4,CURFCB
+         MOVE.B   #$FF,FCBSCF(A4)   NO SPACE COMPRESSION
+         CLR.B    XFERFL             NO TRANSFER ADDR YET
+
+GET2     BSR.L    GETNEW             GET FLAG BYTE
+         CMP.B    #$02,D5            IS IT 02?
+         BEQ.S    GETD2O             2-BYTE ADDRESS DATA PLUS OFFSET
+         CMP.B    #$03,D5            IS IT 03?
+         BEQ.L    GETD4O             4-BYTE ADDRESS DATA PLUS OFFSET
+         CMP.B    #$16,D5            IS IT 16?
+         BEQ.L    GETT2O             2-BYTE TRANSFER PLUS OFFSET
+         CMP.B    #$17,D5            IS IT 17?
+         BEQ.L    GETT4O             4-BYTE TRANSFER PLUS OFFSET
+         CMP.B    #$0F,D5            IS IT 0F?
+         BEQ.L    ADDOF2             2-BYTE ADDRESS TO CHANGE FOLLOWS
+         CMP.B    #$10,D5            IS IT 10?
+         BEQ.L    ADDOF4             4-BYTE ADDRESS TO CHANGE FOLLOWS
+         CMP.B    #$04,D5            IS IT 04?
+         BEQ.S    GETD2N             2-BYTE ADDRESS DATA NO OFFSET
+         CMP.B    #$05,D5            IS IT 05?
+         BEQ.S    GETD4N             4-BYTE ADDRESS DATA NO OFFSET
+         CMP.B    #$18,D5            IS IT 18?
+         BEQ.L    GETT2N             2-BYTE TRANSFER NO OFFSET
+         CMP.B    #$19,D5            IS IT 19?
+         BEQ.L    GETT4N             4-BYTE TRANSFER NO OFFSET
+         CMP.B    #$21,D5            IS IT 21?
+         BEQ.L    GETZEO             ZERO AN AREA OF MEMORY W OFFSET
+         CMP.B    #$22,D5            IS IT 22?
+         BEQ.L    GETZEN             ZERO AN AREA OF MEMORY NO OFFSET
+         CMP.B    #$30,D5            IS IT 30?
+         BEQ.L    SEDATB             SET THE DATA BEGINNING POINTER
+         CMP.B    #$31,D5            IS IT 31?
+         BEQ.L    SEMEMB             SET THE MEM BEGINNING POINTER
+         BRA.S    GET2               ANYTHING ELSE JUST SKIP
+
+GETD2N   BSR.L    GETWRD             GET 2-BYTE LOAD ADDRESS
+         MOVE.L   D1,A2             PUT INTO A2
+         BRA.S    NOOFF1             THEN CONTINUE AS BELOW
+
+GETD2O   BSR.L    GETWRD             GET 2-BYTE LOAD ADDRESS
+         MOVE.L   D1,A2             PUT INTO A2
+         CMP.B    #$2D,LASTRM        WAS LASTRM MINUS SIGN?
+         BEQ.S    NOOFF1             YES, SO DON'T ADD OFFSET
+         ADD.L    OFFSET,A2          ADD LOAD OFFSET ADDRESS
+NOOFF1   BSR.L    GETNEW             GET LENGTH
+         MOVE.L   D5,D2             SET UP AS COUNTER
+         BEQ.L    GET2               NOTHING IF LENGTH=0
+         BRA.S    GETLO0             THEN CONTINUE
+
+GETD4N   BSR.L    GETWRD             GET LEFT WORD OF LOAD ADDRESS
+         SWAP     D1
+         MOVE.L   D1,A2             MOVE INTO A2
+         BSR.L    GETWRD             GET RIGHT WORD OF LOAD ADDRESS
+         ADD.L    D1,A2              COMBINE TWO WORDS
+         BRA.S    NOOFF2             CONTINUE AS BELOW
+
+GETD4O   BSR.L    GETWRD             GET LEFT WORD OF LOAD ADDRESS
+         SWAP     D1
+         MOVE.L   D1,A2             MOVE INTO A2
+         BSR.L    GETWRD             GET RIGHT WORD OF LOAD ADDRESS
+         ADD.L    D1,A2              COMBINE TWO WORDS
+         CMP.B    #$2D,LASTRM        WAS LASTRM MINUS SIGN?
+         BEQ.S    NOOFF2             YES, SO DON'T ADD OFFSET
+         ADD.L    OFFSET,A2          ADD LOAD OFFSET ADDRESS
+NOOFF2   BSR.L    GETWRD             GET LENGTH
+         MOVE.L   D1,D2             SET UP AS COUNTER
+         BEQ.L    GET2               NOTHING IF LENGTH=0
+
+GETLO0   TST.B    FCBDPT(A4)         CHECK FCB DATA POINTER
+         BNE.S    GETLO2             <>0 MEANS OK FOR SHORTCUT
+GETLO1   BSR.L    GETNEW             ELSE GET ONE BYTE
+         TST.B    GETFLG             SHOULD WE CHECK LIMITS?
+         BNE.S    GETNC1             NO, CONTINUE
+         CMP.L    OFFSET,A2          BELOW OFFSET?
+         BCS.L    GETERR             YES - ERROR
+         CMP.L    MEMEND,A2          NO, ABOVE MEMEND?
+         BHI.L    GETERR             YES - ERROR
+
+GETNC1   MOVE.B   D5,(A2)+          STORE IN MEMORY
+         SUB.W    #01,D2             DECREMENT COUNTER
+         BEQ.L    GET2               AT END, LOOK FOR NEXT FLAG
+
+* HERE'S THE SHORTCUT TO QUICK READ BYTES
+GETLO2   MOVE.B   USRFCB+FCBDPT,D5  GET DATA POINTER FROM FCB
+         LEA      FCBDAT(A4,D5.W),A6   POINT A6 TO NEXT DATA BYTE
+GETLO3   TST.B    GETFLG             SHOULD WE CHECK LIMITS?
+         BNE.S    GETNC2             NO, CONTINUE
+         CMP.L    OFFSET,A2          BELOW OFFSET?
+         BCS.L    GETERR             YES - ERROR
+         CMP.L    MEMEND,A2          NO, ABOVE MEMEND?
+         BHI.L    GETERR             YES - ERROR
+
+GETNC2   MOVE.B   (A6)+,(A2)+       MOVE NEXT BYTE
+         ADD.B    #1,D5              INCREMENT DATA POINTER IN D5
+         SUB.W    #01,D2             DECREMENT COUNTER
+         BNE.S    GETLO4             NOT YET FINISHED
+         MOVE.B   D5,USRFCB+FCBDPT  RESTORE DATA POINTER INTO FCB
+         BRA.L    GET2               AND THEN LOOK FOR NEXT FLAG
+
+GETLO4   TST.B    D5                 TEST DATA POINTER
+         BNE.S    GETLO3             REPEAT IF STILL NOT ZERO
+         MOVE.B   D5,USRFCB+FCBDPT  RESTORE DATA POINTER INTO FCB
+         BRA.S    GETLO1
+
+GETT4N   BSR.L    GETWRD             GET LEFT WORD OF TRANSFER ADDRESS
+         SWAP     D1                  MOVE INTO LEFT HALF
+         MOVE.L   D1,A2             SAVE IN A2
+         BSR.L    GETWRD             GET RIGHT HALF OF ADDR
+         ADD.L    A2,D1              ADD BACK TOGETHER
+         BRA.S    NOOFF3             THEN DO REST
+
+GETT2N   BSR.L    GETWRD             GET TRANSFER ADDRESS FROM FILE
+         BRA.S    NOOFF3             THEN DO REST
+
+GETT4O   BSR.L    GETWRD             GET LEFT WORD OF TRANSFER ADDRESS
+         SWAP     D1                  MOVE INTO LEFT HALF
+         MOVE.L   D1,A2             SAVE IN A2
+         BSR.L    GETWRD             GET RIGHT HALF OF ADDR
+         ADD.L    A2,D1              ADD BACK TOGETHER
+         BRA.S    GETT2A             THEN DO REST
+
+GETT2O   BSR.L    GETWRD             GET TRANSFER ADDRESS FROM FILE
+GETT2A   CMP.B    #$2D,LASTRM        WAS LASTRM MINUS SIGN?
+         BEQ.S    NOOFF3             YES, SO DON'T ADD OFFSET
+         ADD.L    OFFSET,D1          ADD IN OFFSET
+NOOFF3   MOVE.L   D1,EXECAD         STORE EXECUTION ADDRESS
+         MOVE.B   #1,XFERFL         SIGNAL THAT TRANSFER ADDRESS EXISTS
+         BRA.L    GET2               AND REPEAT
+
+* FILL MEMORY WITH ZEROES FOR C PROGRAMS
+GETZEN   BSR.L    GETWRD             GET LEFT WORD OF LOAD ADDRESS
+         SWAP     D1
+         MOVE.L   D1,A2             MOVE INTO A2
+         BSR.L    GETWRD             GET RIGHT WORD OF LOAD ADDRESS
+         ADD.L    D1,A2              COMBINE TWO WORDS
+         BRA.S    GZERNF             CONTINUE AS BELOW
+
+GETZEO   BSR.L    GETWRD             GET LEFT WORD OF LOAD ADDRESS
+         SWAP     D1
+         MOVE.L   D1,A2             MOVE INTO A2
+         BSR.L    GETWRD             GET RIGHT WORD OF LOAD ADDRESS
+         ADD.L    D1,A2              COMBINE TWO WORDS
+         CMP.B    #$2D,LASTRM        WAS LASTRM MINUS SIGN?
+         BEQ.S    GZERNF             YES, SO DON'T ADD OFFSET
+         ADD.L    OFFSET,A2          ADD LOAD OFFSET ADDRESS
+GZERNF   BSR.L    GETWRD             GET LEFT HALF OF LENGTH
+         SWAP     D1
+         MOVE.L   D1,D2             SAVE
+         BSR.L    GETWRD             GET RIGHT HALF
+         ADD.L    D1,D2              ADD BOTH PARTS
+         BEQ.L    GET2               NOTHING IF LENGTH=0
+
+GZELOO   TST.B    GETFLG             SHOULD WE CHECK LIMITS?
+         BNE.S    GZENC1             NO, CONTINUE
+         CMP.L    OFFSET,A2          BELOW OFFSET?
+         BCS.L    GETERR             YES - ERROR
+         CMP.L    MEMEND,A2          NO, ABOVE MEMEND?
+         BHI.L    GETERR             YES - ERROR
+
+GZENC1   CLR.B    (A2)+              CLEAR MEMORY
+         SUB.L    #01,D2             DECREMENT COUNTER
+         BNE.S    GZELOO             REPEAT UNTIL 0
+         BRA.L    GET2               AT END, LOOK FOR NEXT FLAG
+
+* ADDOFX - ADD OFFSET TO LONG-WORD POINTED TO BY NEXT
+
+* USE NEXT FOUR BYTES TO POINT
+ADDOF4   BSR.L    GETWRD             GET LEFT WORD OF ADDRESS
+         SWAP     D1
+         MOVE.L   D1,A2             MOVE INTO A2
+ADDOFX   BSR.L    GETWRD             GET RIGHT WORD OF ADDRESS
+         ADD.L    D1,A2              COMBINE TWO WORDS
+         ADD.L    OFFSET,A2          ADD OFFSET TO IT
+         MOVE.L   (A2),D1           GET MEMORY CONTENTS TO MODIFY
+         ADD.L    OFFSET,D1          ADD OFFSET TO IT
+         MOVE.L   D1,(A2)           RESTORE INTO MEMORY
+         BRA.L    GET2
+
+* USE NEXT TWO BYTES TO POINT
+ADDOF2   MOVE.L   #0,A2             LEFT WORD OF ADDR = 0
+         BRA.S    ADDOFX             THEN CONTINUE AS ABOVE
+
+* SET DATA OR MEMBEG POINTERS FOR CRENSHAW'S JINK
+SEDATB   BSR.S    GETWRD             GET LEFT WORD OF ADDRESS
+         SWAP     D1
+         MOVE.L   D1,A2             SAVE
+         BSR.S    GETWRD             RIGHT WORD
+         ADD.L    A2,D1              COMBINE TWO WORDS
+         ADD.L    OFFSET,D1          ADD OFFSET TO IT
+         MOVE.L   D1,DATBEG         STORE
+         BRA.L    GET2
+SEMEMB   BSR.S    GETWRD             GET LEFT WORD OF ADDRESS
+         SWAP     D1
+         MOVE.L   D1,A2             SAVE
+         BSR.S    GETWRD             RIGHT WORD
+         ADD.L    A2,D1              COMBINE TWO WORDS
+         ADD.L    OFFSET,D1          ADD OFFSET TO IT
+         MOVE.L   D1,MEMBEG         STORE
+         BRA.L    GET2
+
+* GETWRD - GET TWO-BYTE WORD FROM FILE
+GETWRD   CLR.L    D5
+         JSR      FREAD                GET MSB BYTE
+         BNE.S    GETNE1             IF ERROR
+         MOVE.L   D5,D1             SAVE IN D1
+         LSL      #8,D1                MOVE INTO SECOND BYTE
+         JSR      FREAD                GET LSB
+         BNE.S    GETNE1             IF ERROR
+         ADD.L    D5,D1              ADD THE TWO BYTES TOGETHER IN D1
+GETEXI   RTS
+
+* GETNEW - GET BYTE FROM FILE
+GETNEW   JSR      FREAD                USE FREAD TO READ BYTE
+         BEQ.S    GETEXI             EXIT IF NO ERROR
+
+GETNE1   MOVE.B   FCBERR(A4),D5     LOOK AT ERROR BYTE
+         CMP.B    #$8,D5             END OF FILE?
+         BNE      PDEROR               NO, SO DO PERROR AND WARMS
+         ADD.L    #4,A7              DELETE EXTRA RETURN ADDRESS
+         CLR.B    ERRTYP             ERASE ERROR MEMORY
+         JSR      FCS4                 GO CLOSE INPUT FILE
+         MOVEM.L  (A7)+,D1-D2/A2/A4
+         CLR.B    GETFLG             REVERT TO CHECKING LIMITS
+         RTS      AND RETURN
+
+GETERR   LEA      GETMSG,A4
+         JSR      PSTRNG               PRINT "LOAD ERROR"
+         CLR.B    XFERFL            ERASE POSSIBLE TRANSFER ADDR
+         JMP      WARMS                AND QUIT
+GETMSG   FCC      'LOAD ERROR - Load address below OFFSET or '
+
+
+
+
+         FCC      'above MEMEND.',4
+
+
+GETHLP   LEA      GTHMSG,A4
+         JSR      PSTRNG
+         RTS
+GTHMSG   FCC      'GET loads a binary file into memory. The syntax is'
+
+
+
+
+         DC.B     $0D,$0A
+         DC.B     ' GET <file-spec>   to load with offset and check load limits'
+
+
+
+
+
+         DC.B     $0D,$0A
+         DC.B     ' GETX <file-spec>  to load with offset but not check load limits'
+
+
+
+
+
+
+         DC.B     $0D,$0A
+         DC.B     ' GET <file-spec>-  to load without offset and check load limits'
+
+
+
+
+
+
+         DC.B     $0D,$0A
+         DC.B     ' GETX <file-spec>- to load without offset and not check limits',4
+
+
+
+
+
+
+
+* DIR COMMAND - PRINT DISK DIRECTORY
+
+DIR      MOVE.B   WORKDR,USRFCB+FCBDRV ASSUME WORK DRIVE
+         MOVE.L   LPOINT,A5         POINT TO NEXT CHAR
+DIRTRY   MOVE.B   (A5)+,D5          GET DRIVE NUMBER
+         CMP.B    #$20,D5            SPACE?
+         BEQ.S    DIRTRY             YES, TRY THE NEXT
+         SUB.B    #$30,D5            CVT FROM ASCII
+         CMP.B    #9,D5              MORE THAN 9?
+         BHI.S    DRNOGO             YES, USE DEFAULT
+         CMP.B    MAXDRV,D5
+         BHI.L    DREROR             NG IF >MAX DRIVE
+         MOVE.B   D5,USRFCB+FCBDRV  STORE INTO FCB
+DRNOGO   CLR.L    D4
+         MOVE.B   USRFCB+FCBDRV,D4  AND SAVE FOR LATER
+
+* PRINT SIGNON AND HEADINGS
+
+         LEA      HDGMSG(PC),A4        PRINT "CATALOG OF DRIVE NUMBER "
+         JSR      PSTRNG
+         ADD.B    #$30,D4            CVT DRIVE NO TO ASCII
+         JSR      PUTCHS               OUTPUT IT
+* PREPARE DIRECTORY INDEX; MAKE ROOM ON STACK AND FILL
+         MOVE.W   #7,D7             ROOM FOR 32 BYTES
+         MOVE.L   #$20202020,D6
+DINLOO   MOVE.L   D6,-(A7)          32 BYTES OF SPACES
+         DBRA     D7,DINLOO
+         CLR.B    31(A7)             CLEAR LAST BYTE AS FLAG
+         MOVE.L   #USRFCB,A4        POINT TO FCB
+         MOVE.L   A4,CURFCB         IN PREPARATION FOR USING FCS
+         CLR.B    ERRTYP
+         MOVE.W   #$0003,USRFCB+FCBCTR WANT SIS NEXT
+         JSR      FCS9                 READ SIS
+         BNE.L    PRTIE              INPUT FILE ERROR
+         LEA      DNMSG(PC),A4         PRINT "DISK NAME:"
+         JSR      PSTRNG
+         LEA      USRFCB+FCBDAT+16,A4  POINT TO NAME
+         CLR.B    D4                 NO SPACES IN NAME
+         BSR.L    FNPRNT             PRINT FILE NAME
+         LEA      SPCMSG(PC),A0        PRINT "    NUMBER"
+         MOVE.B   #11,D1            11 CHARS
+         BSR.L    PSNOCR             PRINT IT
+         MOVE.B   USRFCB+FCBDAT+27,D4
+         LSL.W    #8,D4              (NOT ON WORD BOUNDARY)
+         MOVE.B   USRFCB+FCBDAT+28,D4
+         MOVE.B   #1,D5             PRINT SPACES
+         JSR      OUT5D                PRINT NUMBER
+         JSR      PCRLF
+         JSR      PCRLF                START NEW LINE
+         MOVE.B   USRFCB+FCBDAT+33,D3 NUMBER OF FREE SAVE FOR LATER
+         LSL.W    #8,D3
+         MOVE.B   USRFCB+FCBDAT+34,D3 (NOT ON WORD BOUNDARY)
+
+* NOW READ DIRECTORY
+FINDIT   MOVE.W   #$0005,USRFCB+FCBCTR TRACK 0 SECTOR 5
+FFIND1   MOVE.L   #USRFCB,A4        POINT TO READ FCB
+         JSR      FCS9                 GO READ NEXT DIRECTORY SECTOR
+         BNE.L    PRTIE              INPUT FILE ERROR
+         MOVE.L   USRFCB+FCBDAT,USRFCB+FCBCTR POINTER TO NEXT SECTOR
+         LEA      USRFCB+FCBDAT+16,A2  POINT TO FIRST DIR ENTRY
+
+* NOW DO ONCE FOR EACH ENTRY
+FFIND2   MOVE.L   A2,A0             POINT TO NEXT ENTRY
+         MOVE.B   (A0),D7           CHECK FIRST CHAR OF NAME
+         BMI.L    NXTNAM             DELETED, SO DO NEXT NAME
+         BEQ.L    DONE               DONE AT END OF DIRECTORY
+
+* FOUND A VALID ENTRY, SO PRINT IT
+
+         MOVE.L   A2,A4             POINT TO NAME
+         MOVE.B   #1,D4             WITH SPACES
+         BSR.L    FNPRNT             PRINT NAME
+         MOVE.B   17(A2),D4         GET TO SECTOR COUNT
+         LSL.W    #8,D4              INTO SECOND BYTE FROM RIGHT
+         MOVE.B   18(A2),D4         2ND BYTE OF COUNT
+         MOVE.B   #1,D5             INSERT SPACES
+         JSR      OUT5D                PRINT NUMBER OF SECTORS
+
+* UPDATE DIRECTORY MAP
+         CLR.L    D7
+         MOVE.B   DIRTMP,D7         GET DIRECTORY LETTER
+         BEQ.S    UPDIMA             IGNORE ROOT
+         MOVE.B   #$04,31(A7)       USE EOT AS MARKER
+         MOVE.L   D7,D5
+         JSR      TOUPPR               CVT LOWER CASE TO UPPER
+         CMP.B    #$41,D5
+         BCS.S    BELOA              <A
+         CMP.B    #$5A,D5
+         BHI.S    ABOVZ              >Z
+         MOVE.B   D7,-62(A7,D5)     A-Z MOVE INTO POS 3-28
+         BRA.S    UPDIMA
+BELOA    MOVE.B   #'<',1(A7)        <A INTO POS 1
+         BRA.S    UPDIMA
+ABOVZ    MOVE.B   #'>',30(A7)       >Z INTO POS 30
+
+* NOW DO NEXT NAME
+UPDIMA   CLR.W    D2
+         MOVE.B   DEVOUT,D2         CURRENT OUTPUT DEVICE
+         MULU     #80,D2              X80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         ADD.L    D2,A6              POINT TO CURRENT DEVICE
+         MOVE.B   DTPWID(A6),D2     GET DEVICE'S WIDTH
+         BNE.S    COLNTZ             OK TO USE IF NOT ZERO
+         MOVE.B   #80,D2            ELSE CHANGE 0 TO 80
+COLNTZ   SUB.B    #22,D2             COLUMN WIDTH IS 19+3
+         SUB.B    DTOCOL(A6),D2      COMPARE WITH CURRENT COLUMN
+         BCC.S    MOREOL             OK TO PUT MORE ON LINE
+         JSR      PCRLF                ELSE GO TO NEXT LINE
+         BRA.S    NXTNAM             AND CONTINUE
+MOREOL   LEA      BARMSG,A4            IF MORE, PUT ON A BAR FIRST
+         JSR      PDATA
+NXTNAM   MOVE.L   A2,D0             POINTER TO CURRENT NAME
+         ADD.L    #24,D0             POINT TO NEXT
+         MOVE.L   D0,A2             SAVE IT
+         LEA      USRFCB+FCBDAT+256,A0 POINT PAST FCB
+         CMP.L    A0,A2              PAST END OF FCB?
+         BNE.L    FFIND2             REPEAT UNTIL THIS SECTOR IS DONE
+         MOVE.W   USRFCB+FCBDAT,D7  CHECK GET NEXT TRACK/SECTOR NUMBERS
+         BNE.L    FFIND1             REPEAT IF NOT END OF DIRECTORY
+
+* WHEN DONE, PRINT NUMBER FREE AND DIR INDEX
+
+DONE     JSR      PCRLF
+         JSR      PCRLF
+         MOVE.W   D3,D4             NUMBER FREE
+         MOVE.B   #1,D1             PRECEDE WITH SPACES
+         JSR      OUT5D                PRINT NUMBER
+         LEA      FREMSG(PC),A0        PRINT "FREE SECTORS"
+         MOVE.B   #13,D1
+         BSR.S    PSNOCR             PRINT IT
+         JSR      PCRLF
+         TST.B    31(A7)             CHECK EOT MARKER
+         BEQ.L    WARMS              NO INDEX IF NO ENTRIES
+         LEA      DIXMSG(PC),A4
+         JSR      PSTRNG               PRINT "DIR INDEX:"
+         MOVE.L   A7,A4
+         JSR      PDATA                PRINT INDEX ITSELF
+         LEA      32(A7),A7            CLEAR STACK
+         JSR      PCRLF
+         JMP      WARMS                FINISHED
+DIXMSG   DC.B     'Subdirectories used: ',4
+
+
+
+* PSNOCR PRINT STRING WITHOUT A CR FIRST, REPLACE 0 WITH SPACE
+* ON ENTRY, A0 POINTS TO STRING, D1 IS ITS LENGTH
+* ON ENTRY, A0 POINTS PAST LAST ONE PRINTED
+
+PSNOCR   MOVE.B   (A0)+,D5          GET NEXT CHARACTER
+         BNE.S    PSNOZ              PRINT IT IF NOT ZERO
+         MOVE.B   #$20,D5           ELSE SUBSTITUTE SPACE
+PSNOZ    JSR      PUTCD5               PRINT
+         SUB.B    #01,D1             DECREMENT COUNTER
+         BNE.S    PSNOCR             REPEAT UNTIL DONE
+         RTS      RTS THEN EXIT
+
+* REPORT ERRORS
+
+DREROR   MOVE.B   #15,D5            INCORRECT DRIVE NUMBER'
+         JSR      RPTER0               REPORT ERROR
+         JMP      WARMS
+PRTIE    MOVE.L   #USRFCB,A4        POINT TO READ FCB
+         JSR      PERROR               PRINT ERROR NUMBER
+         JMP      WARMS
+
+* TEXT STRINGS
+
+DNMSG    FCC      "Disk Name: ",4
+
+HDGMSG   FCC      'Catalog of disk in drive ',4
+
+
+SPCMSG   FCC      '   Number: '
+
+BARMSG   FCC      ' | ',4
+FREMSG   FCC      ' Free sectors'
+
+
+* SAVE COMMAND - SAVE BINARY FILE TO DISK
+
+SAVE     MOVE.L   #USRFCB,A4        POINT TO FCB
+         MOVE.L   A4,CURFCB         IN PREPARATION FOR USING FCS
+         CLR.B    ERRTYP
+         JSR      GETNAM               GET FILE NAME FROM COMMAND LINE
+         BCS.L    NAMENG             IF NAME INVALID
+         CLR.B    D4
+         JSR      DEFEXT               DEFAULT TO .BIN
+         JSR      HEXIN                GET FIRST ADDRESS
+         TST.B    D6                 CHECK IF ANYTHING THERE
+         BEQ.L    ADEROR             PRINT ILLEGAL ADDR AND QUIT
+         MOVE.L   D5,A0             A0 = FROM ADDRESS
+         JSR      HEXIN                GET SECOND ADDRESS
+         TST.B    D6                 CHECK IF ANYTHING THERE
+         BEQ.L    ADEROR             PRINT ILLEGAL ADDR AND QUIT
+         MOVE.L   D5,A1             A1 = TO ADDRESS
+         CLR.B    D0                 FLAG = 0 = NO TRANSFER ADDRESS YET
+         JSR      HEXIN                GET THIRD ADDRESS
+         BCS.L    ADEROR             PRINT ILLEGAL ADDR AND QUIT
+         TST.B    D6                 WAS THERE ONE?
+         BEQ.S    NOTRAN             NO
+         MOVE.B   #1,D0             SET FLAG IF NUMBER WAS FOUND
+         MOVE.L   D5,A2             STORE TRANSFER ADDRESS (ZERO IF NONE)
+NOTRAN   CLR.B    D1                 FLAG = 0 = NO OFFSET SUBTRACT
+NGOFFS   MOVE.L   #OFFMSG,A4
+         JSR      PSTRNG               ASK ABOUT OFFSET
+         JSR      GETCHS               GET ANSWER
+         CMP.B    #$31,D5            1 = USE ADDRESSES AS GIVEN?
+         BEQ.S    NOTMIN
+         CMP.B    #$32,D5            2 = SUBTRACT OFFSET ADDRESS?
+         BNE.S    NGOFFS             BAD ANSWER IF NOT 1 OR 2
+         MOVE.B   #1,D1             YES, SET OFFSET SUBTRACT FLAG
+
+NOTMIN   MOVE.L   A1,D5             TO
+         SUB.L    A0,D5              CALC TO-FROM
+         BCS.L    ADEROR             INVALID IF FROM GREATER THAN TO
+
+* OPEN FOR WRITE
+VALID    MOVE.L   #USRFCB,A4        POINT TO USRFCB
+         MOVE.L   A4,CURFCB
+         JSR      FCS2                 OPEN FOR WRITING
+         BNE.L    OPEROR             IF ERROR ON OPENING
+         MOVE.B   #$FF,FCBSCF(A4)   DISABLE SPACE COMPRESSION
+
+* CHECK TO SEE WHETHER 02 OR 03 SHOULD BE USED
+
+         CMP.L    #$FFFF,A1          CHECK TO ADDRESS
+         BLS.S    S2LOOP             USE 02 IF TO<$10000
+
+* MAIN 03 LOOP
+
+S3LOOP   MOVE.L   A1,D2             TO
+         SUB.L    A0,D2              CALC TO-FROM
+         ADD.L    #1,D2              NOW ACTUAL LENGTH TO OUTPUT
+         BEQ.S    OUTTA              IF ZERO, GO OUTPUT TRANSFER ADDRESS
+         CMP.L    #$FFFF,D2          LONGER THAN WE CAN DO?
+         BLS.S    B3ISOK             NO, OK TO USE AS IS0
+         MOVE.W   #$FFFF,D2         ELSE OUTPUT ONLY FFFF BYTES
+B3ISOK   MOVE.B   #3,D4             03 = DATA SEGMENT FOLLOWS
+         BSR.L    OUTCHA             OUTPUT THE 03 CODE
+         MOVE.L   A0,D3             STARTING ADDRESS
+         BSR.L    DOFFST             MAYBE SUBTRACT OFFSET
+         BSR.L    OUTCH4             OUTPUT FOUR BYTES OF IT
+         MOVE.W   D2,D3             LENGTH OF SEGMENT
+         BSR.L    OUTCH2             OUTPUT TWO BYTES
+
+* SEGMENT LOOP TO OUTPUT ONE ENTIRE SEGMENT
+* OF LENGTH D2 BEGINNING AT FROM
+SG3LOO   MOVE.B   (A0)+,D4          GET NEXT BYTE
+         BSR.S    OUTCHA
+         SUB.W    #1,D2              DECREMENT COUNTER (LENGTH)
+         BNE.S    SG3LOO             KEEP GOING FOR LENGTH
+         BRA.S    S3LOOP             REPEAT AT END OF SEGMENT
+
+* MAIN 02 SAVE LOOP
+
+S2LOOP   MOVE.L   A1,D2             TO
+         SUB.L    A0,D2              CALC TO-FROM
+         ADD.L    #1,D2              NOW ACTUAL LENGTH TO OUTPUT
+         BEQ.S    OUTTA              IF ZERO, GO OUTPUT TRANSFER ADDRESS
+         CMP.L    #$FF,D2            LONGER THAN WE CAN DO?
+         BLS.S    B2ISOK             NO, OK TO USE AS IS0
+         MOVE.B   #$FF,D2           ELSE OUTPUT ONLY FF BYTES
+B2ISOK   MOVE.B   #2,D4             02 = DATA SEGMENT FOLLOWS
+         BSR.S    OUTCHA             OUTPUT THE 02 CODE
+         MOVE.L   A0,D3             STARTING ADDRESS
+         BSR.S    DOFFST             MAYBE SUBTRACT OFFSET
+         BSR.S    OUTCH2             OUTPUT TWO BYTES OF IT
+         MOVE.B   D2,D4             LENGTH OF SEGMENT
+         BSR.S    OUTCHA             OUTPUT A SINGLE BYTE FROM A
+
+* SEGMENT LOOP TO OUTPUT ONE ENTIRE SEGMENT
+* OF LENGTH D2 BEGINNING AT FROM
+SG2LOO   MOVE.B   (A0)+,D4          GET NEXT BYTE
+         BSR.S    OUTCHA
+         SUB.B    #1,D2              DECREMENT COUNTER (LENGTH)
+         BNE.S    SG2LOO             KEEP GOING FOR LENGTH
+         BRA.S    S2LOOP             REPEAT AT END OF SEGMENT
+
+* OUTPUT TRANSFER ADDRESS AT END
+OUTTA    TST.B    D0                 IS THERE A TRANSFER ADDRESS?
+         BEQ.S    CLOSFI             NO, GO CLOSE FILE
+         CMP.L    #$FFFF,A2          CHECK IT
+         BLS.S    OUT16              OUTPUT 16 IF <10000
+
+* OUTPUT 3-BYTE TRANSFER ADDRESS
+
+OUT17    MOVE.B   #$17,D4           OUTPUT A 17
+         BSR.S    OUTCHA             OUTPUT A SINGLE BYTE
+         MOVE.L   A2,D3             TRANSFER ADDRESS
+         BSR.S    DOFFST             MAYBE SUBTRACT OFFSET
+         BSR.S    OUTCH4             OUTPUT IT
+         BRA.S    CLOSFI             THEN CLOSE FILE
+
+* OUTPUT 2-BYTE TRANSFER ADDRESS
+
+OUT16    MOVE.B   #$16,D4           OUTPUT A 16
+         BSR.S    OUTCHA             OUTPUT A SINGLE BYTE
+         MOVE.L   A2,D3             TRANSFER ADDRESS
+         BSR.S    DOFFST             MAYBE SUBTRACT OFFSET
+         BSR.S    OUTCH2             OUTPUT IT
+
+* THEN CLOSE FILE
+
+CLOSFI   JSR      FCS4                 GO CLOSE THE FILE
+         BNE.L    ERROR
+STOP     JMP      WARMS
+
+* FILE OUTPUT ROUTINES
+
+OUTCHA   JSR      FWRITE               OUTPUT CHARACTER FROM D4
+         BNE.L    ERROR              EXIT IF ERROR
+         RTS      EXIT
+OUTCH2   MOVE.W   D3,D4
+         LSR.W    #8,D4              LEFT BYTE TO RIGHT
+         BSR.S    OUTCHA             OUTPUT IT
+         MOVE.B   D3,D4             RIGHT BYTE INTO D4
+         BRA.S    OUTCHA             AND OUTPUT IT
+OUTCH4   SWAP     D3                  SWITCH HALVES
+         BSR.S    OUTCH2             OUTPUT FIRST TWO
+         SWAP     D3                  BACK TO ORIGINAL
+         BRA.S    OUTCH2             OUTPUT SECOND TWO
+DOFFST   TST.B    D1                 CHECK IF SUBTR OFFSET
+         BEQ.S    DOFRTS             NO
+         SUB.L    OFFSET,D3          YES, SUBTRACT IT
+         BCS.S    DOFERR             ERROR IF <0
+DOFRTS   RTS      ELSE EXIT
+DOFERR   MOVE.L   #NGOMSG,A4
+         JSR      PSTRNG               PRINT 'OFFSET ERROR'
+         BRA.S    ANDCLO             CLOSE FILE AND EXIT
+
+* ERROR PROCESSING
+
+OPEROR   MOVE.B   FCBERR(A4),D5     ON ERROR, CHECK IT
+         CMP.B    #3,D5              FILE ALREADY EXISTS?
+         BNE.S    ERROR              IF ERROR
+         MOVE.L   #DELMSG,A4        ASK "MAY IT BE DELETED?"
+         BSR.S    PRTASK             PSTRNG, GET ANSW, CHECK Y
+         BNE.S    STOP               QUIT IF NOT Y
+         MOVE.L   #SURMSG,A4        ASK "ARE YOU SURE"
+         BSR.S    PRTASK             PSTRNG, GET ANSW, CHECK Y
+         BNE.S    STOP               QUIT IF NOT Y
+         MOVE.L   #USRFCB,A4        POINT BACK TO FCB
+         MOVE.B   FCBNAM(A4),D2
+         JSR      FCS12                GO DELETE THE FILE
+         BNE.S    ERROR
+         MOVE.B   D2,FCBNAM(A4)     RESTORE FIRST CHAR OF NAME
+         BRA.L    VALID
+
+NAMENG   MOVE.B   #21,D5
+         JSR      RPTER0               PRINT "INVALID FILE NAME"
+         JMP      WARMS                AND QUIT
+
+ADEROR   MOVE.L   #ILLMSG,A4        PRINT 'MISSING OR INVALID ADDR'
+         JSR      PSTRNG
+         JMP      WARMS                AND QUIT
+
+ERROR    JSR      PERROR               ELSE REPORT IT
+ANDCLO   MOVE.L   #USRFCB,A4        POINT TO FCB
+         JSR      FCS4                 CLOSE FILE
+         JMP      WARMS                AND QUIT
+
+* PSTRNG, GET REPLY, CHECK FOR "Y"
+PRTASK   JSR      PSTRNG               PRINT IT
+         JSR      GETCHS               GET REPLY
+         AND.B    #$DF,D5            MASK PARITY
+         CMP.B    #$59,D5            IS IT Y?
+         RTS
+
+NAMSG    FCC      'INVALID FILE NAME',4
+
+ILLMSG   FCC      'MISSING/INVALID ADDRESS',4
+
+
+DELMSG   FCC      'FILE EXISTS - SHOULD I DELETE IT? ',4
+
+
+
+SURMSG   FCC      'ARE YOU SURE? ',4
+
+OFFMSG   FCC      'SAVE OPTIONS:'
+
+         FCB      $D,$A
+         FCC      '  1. USE ABOVE ADDRESSES (IGNORING OFFSET), OR'
+
+
+
+
+         FCB      $D,$A
+         FCC      '  2. SUBTRACT OFFSET FROM ABOVE ADDRESSES'
+
+
+
+
+         FCB      $D,$A
+         FCC      'CHOOSE 1 OR 2: ',4
+
+NGOMSG   FCB      7
+         FCC      'NOT COMPLETED - SPECIFIED ADDRESS IS BELOW OFFSET.',4
+
+
+
+
+
+
+         EVEN
+
+*         LIB      1.TXSUBR
+
+* SUBROUTINE CODE FOLLOWS
+
+* GETNX - GET NEXT CHARACTER FROM LINBUF BUFFER, AND
+* CLASF - CLASSIFY IT AS ALPHANUMERIC OR NOT
+
+GETNX    MOVEM.L  A5-A5,-(A7)         PUSH ON STACK
+
+         CLR.L    D5
+         MOVE.B   CURRCH,PRECHR     SAVE PREVIOUS CHARACTER
+GETNX0   MOVE.L   LPOINT,A5         POINT TO CHARACTER
+         MOVE.B   0(A5),D5          GET CHARACTER
+         MOVE.B   D5,CURRCH         STORE CURRENT CHARACTER
+         CMP.B    #$0D,D5            CR?
+         BEQ.S    CLASF0             YES, SKIP INX AND SPACE TEST
+         CMP.B    ENDLIN,D5          END OF LINE?
+         BEQ.S    CLASF0             YES, SKIP INX AND SPACE TEST
+
+* ON OTHER THAN CR OR EOL, STEP PAST IT
+         ADD.L    #1,A5
+         MOVE.L   A5,LPOINT         SAVE NEW LPOINT
+
+* IF SPACE, STEP PAST IT TO NEXT NON-SPACE
+GETNX2   CMP.B    #$20,D5            SPACE?
+         BNE.S    CLASF0             NO
+         CMP.B    (A5),D5            YES, IS NEXT ONE ALSO SPACE?
+         BEQ.S    GETNX0             YES, SO READ AND REPEAT
+CLASF0   MOVEM.L  (A7)+,A5-A5      PULL
+         BRA.S    CLASF3
+
+* CLASSIFY CHARACTER, AND RETURN CARRY SET IF NOT ALPHANUMERIC
+* INPUT CHARACTER IS IN D4, IS MOVED INTO D5
+
+CLASF    MOVE.B   D4,D5
+CLASF3   CMP.B    #$30,D5
+         BCS.S    CLASF2             UNDER '0' IS NOT ALPHA
+         CMP.B    #$39,D5
+         BLS.S    CLASF1             DIGITS 0-9 ARE OK
+         CMP.B    #$41,D5
+         BCS.S    CLASF2             BELOW 'A' IS NOT ALPHA
+         CMP.B    #$5A,D5
+         BLS.S    CLASF1             LETTERS A-X ARE OK
+         CMP.B    #$61,D5
+         BCS.S    CLASF2             CHARACTERS BETWEEN Z AND a ARE NG
+         CMP.B    #$7A,D5
+         BHI.S    CLASF2             ABOVE 'z' IS AGAIN NG
+
+CLASF1   DC.L     $023C00FE AND #$FE,CCR             CLEAR CARRY IF OK
+         RTS
+
+CLASF2   MOVE.B   D5,LASTRM         ELSE STORE TERMINATOR
+         DC.L     $003C0001 OR #1,CCR                SET CARRY
+         RTS      AND RETURN
+
+* SEENXT - LOOK AT NEXT CHARACTER IN LINBUF BUFFER WITHOUT
+* ACTUALLY MOVING THE POINTER PAST IT AS IN GETNXT.
+* DON'T CLASSIFY
+
+SEENXT   MOVEM.L  A5-A5,-(A7)      PUSH ON STACK
+
+         CLR.L    D5
+         MOVE.L   LPOINT,A5         POINT TO CHARACTER
+         MOVE.B   0(A5),D5          GET CHARACTER
+         MOVEM.L  (A7)+,A5-A5      PULL
+         RTS      DON'T CLASSIFY
+
+* INLINE - ROUTINE TO ENTER DATA FROM KEYBOARD INTO
+* THE LINBUF LINE BUFFER
+
+INLINE   EQU      *
+
+INBUF1   MOVE.L   #LINBUF,A5        POINT A5 TO BUFFER
+         MOVE.L   A5,LPOINT         POINT LPOINT TO BUFFER
+INBUF2   JSR      GETCHS               GET NEXT CHARACTER
+         CMP.B    DELETE,D5          CONTROL-X?
+         BNE.S    INBUF4             NO
+
+* ON CONTROL-X BACKUP TO BEGINNING OF LINE
+INBUF3   CMP.L    #LINBUF,A5         AT BEGINNING?
+         BEQ.S    INBUF1             YES, REPEAT
+         MOVE.B   #8,D5
+         BSR.L    PUTECH             PRINT BACKSPACE
+         MOVE.B   #$20,D5
+         BSR.L    PUTECH             PRINT SPACE
+         MOVE.B   #8,D5
+         BSR.L    PUTECH             BACKSPACE AGAIN
+         SUB.L    #1,A5
+         BRA.S    INBUF3             UNTIL AT BEGINNING
+
+* CONTINUE IF NOT CONTROL-X
+INBUF4   CMP.B    BACKSP,D5          BS?
+         BNE.S    INBUF5             NO
+
+* BACKSPACE CHARACTER
+         CMP.L    #LINBUF,A5         AT BEGINNING?
+         BNE.S    INBU4A             NO, SO DO BACKSPACE OK
+         MOVE.B   #$20,D5           YES, SO CANCEL IT
+         BSR.L    PUTECH
+         BRA.S    INBUF1             AND START OVER
+
+INBU4A   SUB.L    #1,A5              BACKSPACE
+         CMP.B    #8,BECHO           IS BS ECHO A BS CHAR?
+         BNE.S    NOTBE8             NO
+         MOVE.B   #$20,D5           YES, SO PRECEDE WITH SPACE
+         BSR.S    PUTECH
+NOTBE8   MOVE.B   BECHO,D5
+         BSR.S    PUTECH             THEN OUTPUT ECHO CHARACTER
+         BRA.S    INBUF2             AND GO GET NEXT
+
+* CONTINUE IF NOT BACKSPACE
+INBUF5   CMP.B    #$0D,D5            RETURN?
+         BEQ.S    INBUF6             YES
+         CMP.B    REPEAT,D5          REPEAT CONTROL-A - AGAIN?
+         BEQ.S    INAGIN             YES
+         CMP.B    #$20,D5
+         BCS.L    INBUF2             IGNORE OTHER CONTROL CHARS
+
+* FINALLY STORE CHARACTER
+         MOVE.B   D5,(A5)           STORE IT
+         CMP.L    #LINBUF+127,A5     CHECK FOR END OF BUFFER
+         BEQ.S    INBU5A             YES, AT END SO IGNORE
+         ADD.L    #1,A5              NO, UPDATE POINTER
+         BRA.L    INBUF2             AND GET NEXT CHARACTER
+INBU5A   MOVE.B   #8,D5             USE BACKSPACE TO...
+         BSR.S    PUTECH             ERASE EXTRA CHARACTER
+         MOVE.B   #7,D5             AND RING BELL
+         BSR.S    PUTECH
+         BRA.L    INBUF2             AND CONTINUE
+
+* ON CONTROL-A REPEAT LINE UP TO CR
+INAGIN   MOVE.B   (A5),D5           GET NEXT CHAR
+         CMP.B    #$0D,D5            CR?
+         BEQ.L    INBUF2             YES, RETURN TO INPUT
+         BSR.L    PUTCD5             ELSE OUTPUT THIS CHAR
+         ADD.L    #1,A5              STEP PAST IT
+         CMP.L    #LINBUF+126,A5     AT END OF BUFFER?
+         BNE.S    INAGIN             NO, DO NEXT
+         BRA.L    INBUF2             YES, RETURN TO INPUT
+
+INBUF6   MOVE.B   D5,0(A5)          STORE CARR RET AT VERY END
+         MOVE.B   #$0A,D5
+         BSR.S    PUTECH             FOLLOW WITH LF
+         RTS      AND RETURN
+
+* PUTECH - OUTPUT ONLY IF ECHO IS ON
+
+PUTECH   TST.B    INECHO             CHECK WHETHER ECHO
+         BEQ.S    PUTECX             DON'T IF ZERO
+         BSR.L    PUTCD5
+PUTECX   RTS
+
+* PSTRNG - PRINT A STRING UP TO 04 DELIMITER W CR/LF
+* PCRLF - PRINT CARRIAGE RETURN AND LINE FEED
+* PDATA - SIMILAR TO PSTRNG BUT W/O CR/LF
+*
+* CALLED BY: EVERYBODY, INCLUDING USER
+* INPUT:     A4 POINTS TO TEXT TO PRINT
+* OUTPUT:    NONE
+* REGISTERS USED: A5, D5
+
+
+PSTRNG   BSR.S    PCRLF              PRECEDE STRING WITH CRLF
+
+PDATA    MOVE.L   A4,A5             POINT TO STRING TO PRINT
+
+PSTRN1   MOVE.B   (A5)+,D5          GET NEXT CHARACTER
+         CMP.B    #4,D5              END OF STRING MARKER?
+         BEQ.S    PSTRN2             YES
+         BSR.L    PUTCD5             NO, OUTPUT IT
+         BRA.S    PSTRN1             AND REPEAT
+
+PSTRN2   RTS
+
+PCRLF    MOVE.B   #$0D,D5           CR
+         BSR.L    PUTCD5
+         MOVE.B   #$0A,D5           LF
+         BSR.L    PUTCD5
+         RTS
+
+* ASSORTED NUMERIC INPUT AND OUTPUT ROUTINES
+
+* OUT10D - OUTPUT A 10-DIGIT DECIMAL NUMBER
+*
+* CALLED BY:
+* INPUT: INPUT IS IN D4; D5<>0 TO PRECEDE WITH SPACES
+*           (ELSE PRECEDED BY NOTHING)
+* OUTPUT:
+* REGISTERS USED:
+
+
+OUT10D   MOVEM.L  D2-D3,-(A7)      PUSH REGISTERS
+         MOVE.L   D4,D3             GET BINARY NUMBER TO BE OUTPUT
+         MOVE.L   #DECTA1,A5        POINT TO POWERS OF TEN TABLE
+         BRA.S    OUTXD
+
+* OUT5D - OUTPUT A 5-DIGIT DECIMAL NUMBER
+*
+* CALLED BY:
+* INPUT: INPUT IS IN D4; D5<>0 TO PRECEDE WITH SPACES
+*           (ELSE PRECEDED BY NOTHING)
+* OUTPUT:
+* REGISTERS USED:
+
+
+OUT5D    MOVEM.L  D2-D3,-(A7)      PUSH REGISTERS
+         CLR.L    D3
+         MOVE.W   D4,D3             GET BINARY NUMBER TO BE OUTPUT
+         MOVE.L   #DECTA2,A5        POINT TO POWERS OF TEN TABLE
+
+OUTXD    CLR.L    D7                 ASSUME ZEROES TO BE SUPPRESSED
+         MOVE.L   D5,D2             MOVE SPACE FLAG
+* DIGIT LOOP
+DIGLOO   CLR      D5                   CLEAR COUNTER FOR NUMBER OF SUBTR
+DIGLO1   SUB.L    (A5),D3            SUBTRACT CURRENT POWER OF TEN
+         BCS.S    DIGLT0             RESULT LESS THAN 0
+         ADD.B    #1,D5              ADD 1 TO COUNTER
+         BRA.S    DIGLO1             AND REPEAT
+
+* D5 NOW CONTAINS FIRST DIGIT. PRINT IF <>0, OR IF
+* ZERO FLAG <>0. IF ZERO FLAG=0 THEN SKIP IF B WAS
+* 0, OR REPLACE BY SPACES IF B<>0.
+DIGLT0   ADD.L    (A5),D3            ADD BACK THE EXTRA SUBTRACTION
+         ADD.B    #$30,D5            CONVERT TO ASCII
+         CMP.B    #$30,D5            CHECK FOR 0
+         BNE.S    ODPRNT             IF <>0 THEN PRINT IT
+         TST.B    D7                 TEST ZERO FLAG
+         BNE.S    ODPRNT             IF <>0 THEN PRINT IT
+         CMP.L    #DECTA3,A5         AT END OF DECIMAL TABLE?
+         BEQ.S    ODPRNT             ALWAYS PRINT LAST ZERO
+         TST.L    D2                 TEST D2 FOR SPACE SUPPRESSION
+         BEQ.S    NOPRNT             NO PRINT IF SUPPRESSION IS ON
+         MOVE.B   #$20,D5           ELSE CONVERT ZERO TO SPACE
+         SUB.B    #1,D7              FIX UP ZERO FLAG
+ODPRNT   JSR      PUTCD5               OUTPUT A DIGIT OR SPACE
+         ADD.B    #1,D7              SET ZERO FLAG
+NOPRNT   ADD.L    #4,A5              GO TO NEXT POWER OF 10
+         CMP.L    #DECTA4,A5         DONE?
+         BNE.S    DIGLOO             NO, DO NEXT DIGIT
+         MOVEM.L  (A7)+,D2-D3      PULL REGISTERS
+         RTS      AND RETURN
+
+DECTA1   DC.L     1000000000,100000000,10000000
+
+         DC.L     1000000,100000
+DECTA2   DC.L     10000,1000,100,10
+
+DECTA3   DC.L     1
+DECTA4   EQU      *
+
+* DECIN AND HEXIN INPUT ROUTINES
+*
+* CALLED BY: EVERYBODY, INCLUDING USER
+* INPUT:     NUMBER IS NEXT IN LINE BUFFER
+* OUTPUT:    D5=NUMBER, D6=0 IF NO NUMBER PRESENT, C=1 IF ERROR
+* REGISTERS USED: A5, D5
+
+DECIN    MOVEM.L  D3-D4,-(A7)
+         CLR.B    D7                 FLAG
+         BRA.S    GETHE1             AND DO SIMILAR TO HEX
+
+HEXIN    MOVEM.L  D3-D4,-(A7)
+         MOVE.B   #1,D7             FLAG 1=HEX, 0=DEC
+
+GETHE1   MOVE.L   #0,D3             NO NUMBER AS YET
+         MOVE.L   #0,D6             CLEAR B FLAG FOR ERROR
+
+* MAIN GET NUMBER LOOP
+GETHD1   JSR      GETNX                GET NEXT CHARACTER FROM INPUT BUFFER
+         BCS.S    GETFIN             FINISHED IF NOT ALPHA
+         CMP.B    #$39,D5            CHECK IF A DIGIT
+         BLS.S    GETHD2             IS DIGIT
+         TST.B    D7                 HEX OR DECIMAL?
+         BEQ.S    GETSKP             ALL LETTERS ARE NG FOR DECIMAL
+         JSR      TOUPPR               CVT lower TO UPPER
+         CMP.B    #$46,D5            CHECK FOR VALID HEX LETTER
+         BHI.S    GETSKP             G-Z ARE NG, ONLY A-F OK
+GETHD2   SUB.B    #$30,D5            CONVERT FROM ASCII
+         CMP.B    #9,D5
+         BLS.S    GETHD6             IF DIGIT 0 THROUGH 9
+         AND.B    #$1F,D5            CVT LOWER TO UPPER CASE
+         SUB.B    #7,D5              CONVERT LETTERS FROM ASCII
+
+* ON A VALID DIGIT, MULTIPLY D3 BY BASE (10 OR 16)
+* AND ADD CURRENT DIGIT
+GETHD6   MOVE.L   D3,D4             TEMP SAVE BINARY IN D4
+         ASL.L    #2,D3              4*D3
+         TST.B    D7                 CHECK WHETHER HEX OR DECIMAL
+         BNE.S    GETHDH             HEX
+         ADD.L    D4,D3              5*D3 IF DECIMAL
+         ASL.L    #1,D3              10*D3
+         BRA.S    GETHD7             AND CONTINUE
+GETHDH   ASL.L    #2,D3              16*D3
+GETHD7   ADD.L    D5,D3              ADD CURRENT DIGIT TO D3
+         MOVE.B   #1,D6             SET B FOR VALID NUMBER
+         BRA.S    GETHD1             AND GO DO NEXT DIGIT
+
+* WHEN INVALID DIGIT IS FOUND, STEP TO NEXT CR OR SPACE
+GETSKP   JSR      GETNX                GET NEXT CHARACTER
+         BCC.S    GETSKP             IF IT'S ALPHA, KEEP STEPPING
+         MOVE.L   D3,D5             RETURN RESULT IN D5
+         MOVEM.L  (A7)+,D3-D4      PULL
+         DC.L     $003C0001 OR #1,CCR RETURN C=1
+         RTS      FINALLY EXIT WITH CARRY SET
+
+* NORMAL EXIT AT END OF NUMBER: C=0, D6<>0, D5=ANSWER
+GETFIN   MOVE.L   D3,D5             RETURN RESULT IN D5
+         MOVEM.L  (A7)+,D3-D4      PULL
+         DC.L     $023C00FE AND #$FE,CCR RETURN C=0
+         RTS      RTS
+
+* OUT8H ROUTINE - OUTPUT 8-DIGIT HEX NUMBER FROM D4
+OUT8H    SWAP     D4                  MOVE FIRST TWO BYTES RIGHT
+         BSR.S    OUT4H              OUTPUT LEFT 4 DIGITS
+         SWAP     D4                  MOVE BACK TO ORIGINAL
+         BSR.S    OUT4H              OUTPUT RIGHT 4 DIGITS
+         RTS      RTS
+
+* OUT4H ROUTINE - OUTPUT 4-DIGIT HEX NUMBER FROM D4
+OUT4H    ROL.W    #8,D4              MOVE LEFT BYTE TO RIGHT
+         BSR.S    OUT2H              OUTPUT LEFT BYTE
+         ROL.W    #8,D4              MOVE BACK TO ORIGINAL
+         BSR.S    OUT2H              OUTPUT RIGHT BYTE
+         RTS      RTS
+
+* OUT2H ROUTINE - OUTPUT 2-DIGIT HEX NUMBER IN D4
+OUT2H    MOVE.B   D4,D5             FOR PRINTING
+         LSR.B    #4,D5              LEFT NIBBLE GOES RIGHT
+         BSR.S    OUTH               OUTPUT LEFT HEX CHAR
+         MOVE.B   D4,D5             RIGHT NIBBLE READY
+         BSR.S    OUTH               OUTPUT RIGHT HEX CHAR
+         RTS
+
+* OUTH - OUTPUT ONE HEX DIGIT IN D5
+OUTH     AND.B    #$0F,D5            OUTPUT RIGHT DIGIT ENTRY
+         ADD.B    #$30,D5            CONVERT TO ASCII
+         CMP.B    #$39,D5            OVER 9?
+         BLS.L    PUTCD5             NO, JUST PRINT IT
+         ADD.B    #$7,D5             YES, CONVERT FOR A - F
+         JMP      PUTCD5               AND THE PRINT IT
+
+* PERROR - REPORT SK*DOS ERROR NUMBER
+*
+* CALLED BY:
+* INPUT: A4 POINTS TO FCB WITH ERROR CODE
+* OUTPUT:
+* REGISTERS USED: SEE MOVEM
+
+
+* SEPARATE ERROR ENTRY FOR SK*DOS ROUTINES
+RPTER0   MOVEM.L  A4/D1-D4,-(A7)
+         MOVE.L   D5,D4
+         MOVE.L   #ERRMSG,A4
+         MOVE.B   DEVOUT,D2
+         MOVE.B   D2,DEVTMP         TEMP SAVE CURRENT OUTPUT DEVICE
+         MOVE.B   #1,DEVOUT         AND SWITCH TO ERROR DEVICE
+         JSR      PSTRNG               PRINT ERROR MESSAGE
+         MOVE.L   CURFCB,D2         TEMP SAVE CURFCB
+         MOVE.B   ERRTYP,D3         AND ALSO ERROR TYPE
+         AND.L    #$00FF,D4          CONVERT BYTE TO LONG
+         CLR.L    D5                 NO SPACES
+         JSR      OUT5D                OUTPUT THE NUMBER
+         BRA.L    RPTER1
+
+PERROR   MOVEM.L  A4/D1-D4,-(A7)
+         MOVE.B   FCBERR(A4),D4     GET ERROR NUMBER
+         BEQ.L    RPTER2             NO ERROR EXISTS, EXIT
+
+         MOVE.L   #ERRMSG,A4
+         MOVE.B   DEVOUT,D2
+         MOVE.B   D2,DEVTMP         TEMP SAVE CURRENT OUTPUT DEVICE
+         MOVE.B   #1,DEVOUT         AND SWITCH TO ERROR DEVICE
+         JSR      PSTRNG               PRINT ERROR MESSAGE
+         MOVE.L   CURFCB,D2         TEMP SAVE CURFCB
+         MOVE.B   ERRTYP,D3         AND ALSO ERROR TYPE
+         AND.L    #$00FF,D4          CONVERT BYTE TO LONG
+         CLR.L    D5                 NO SPACES
+         JSR      OUT5D                OUTPUT THE NUMBER
+         CMP.B    #02,D4             CHECK FOR 2,3,4,8,12,13
+         BEQ.S    PR2348             ONLY DO ON THOSE
+         CMP.B    #03,D4
+         BEQ.S    PR2348
+         CMP.B    #04,D4
+         BEQ.S    PR2348
+         CMP.B    #08,D4
+         BEQ.S    PR2348
+         CMP.B    #12,D4
+         BEQ.S    PR2348
+         CMP.B    #13,D4
+         BNE.S    RPTER1             ANY OTHER ERRORS DON'T DO
+PR2348   LEA      DASMSG(PC),A4        DO THIS ON 2,3,4,8,12,13
+         JSR      PDATA                PRINT " - "
+         MOVE.L   16(A7),A4         POINT A4 BACK TO FCB
+         MOVE.L   (A4)+,D5          DRIVE NUMBER
+         CMP.B    MAXDRV,D5          CHECK IF VALID
+         BHI.S    RPTER1             NG IF DRIVE>MAXDRV
+         ADD.B    #$30,D5            CVT TO ASCII
+         JSR      PUTCD5               PRINT DRIVE NUMBER
+         MOVE.B   #$2E,D5
+         JSR      PUTCD5               PERIOD
+         MOVEM.L  D4-D4,-(A7)
+         CLR.B    D4                 NO SPACES
+         BSR.L    FNPRNT             PRINT FILE NAME
+         MOVEM.L  (A7)+,D4-D4      RESTORE ERROR NUMBER
+
+RPTER1   MOVE.B   DEVTMP,D5
+         MOVE.B   D5,DEVOUT         AND RESTORE ORIGINAL OUT DEV
+         MOVE.L   ERRVEC,D5         GET USER ERROR VECTOR
+         MOVE.L   D5,A5             ...INTO A5, BUT TEST D5
+         BNE.S    USEVEC             USE IT IF IT EXISTS
+         MOVE.L   #ERRNAM,A5        ELSE USE "ERRCODES.SYS"
+USEVEC   MOVE.L   #SIRFCB+FCBNAM,A6
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       PUT "ERRCODES.SYS" INTO FCB
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   #SIRFCB,A4        POINT TO SIRFCB
+         MOVE.B   SYSTDR,FCBDRV(A4) USE SYSTEM DRIVE
+         CLR.B    ERRTYP
+         MOVE.L   A4,CURFCB
+         JSR      FCS1                 OPEN IT
+         BNE.S    RPTEXI             EXIT IF NOT THERE
+         JSR      FCS4                 CLOSE IT AGAIN
+         BNE.S    RPTEXI             EXIT ON ERROR
+         MOVE.B   #1,FCBRW(A4)      MAKE BELIEVE IT'S STILL OPEN
+         DIVU     #10,D4              DIVIDE ERROR NUMBER BY 10
+         MOVE.W   D4,D7             TENS DIGIT INTO D7
+         ASL.W    #8,D7              AND MOVEINTO SECOND BYTE
+         SWAP     D4                  UNITS INTO RIGHT BYTE
+         ADD.W    D7,D4              COMBINE IN D4
+         ADD.W    #$3030,D4          CONVERT TO ASCII
+         CLR.B    D1                 CLEAR PREVIOUS BYTE
+RPTER4   LSL.W    #8,D1              SHIFT PREVIOUS D1 LEFT
+         JSR      FREAD                READ SECOND BYTE FROM FILE
+         BNE.S    RPTEXI             EXIT ON ERROR
+         MOVE.B   D5,D1             MOVE NEW BYTE INTO D1
+         CMP.W    D1,D4              COMPARE FILE AGAINST ERROR CODE
+         BNE.S    RPTER4             NO MATCH SO READ MORE
+RPTER5   JSR      FREAD                READ A BYTE
+         BNE.S    RPTEXI             EXIT ON ERROR
+         CMP.B    #$0D,D5            END OF LINE?
+         BEQ.S    RPTEXI             STOP ON END
+         MOVEM.L  D5-D5,-(A7)
+         MOVE.B   DEVOUT,D5
+         MOVE.B   D5,DEVTMP         TEMP SAVE CURRENT OUTPUT DEVICE
+         MOVE.B   #1,DEVOUT         AND SWITCH TO ERROR DEVICE
+         MOVEM.L  (A7)+,D5-D5
+         JSR      PUTCD5               OUTPUT ERROR TEXT
+         MOVE.B   DEVTMP,D5
+         MOVE.B   D5,DEVOUT         RESTORE ORIGINAL OUT DEV
+         BRA.S    RPTER5             AND REPEAT
+
+RPTEXI   MOVE.L   D2,CURFCB         RESTORE CURFCB
+         MOVE.B   D3,ERRTYP         RESTORE ERRTYP
+RPTER2   MOVEM.L  (A7)+,D1-D4/A4
+         RTS
+
+ERRMSG   DC.B     $D,$A
+         DC.B     'ERROR ',4
+DASMSG   DC.B     ' - ',4
+ERRNAM   DC.L     'ERRCODESSYS'       ERROR FILE NAME
+
+* NAMOVE ROUTINE - MOVE NAME FROM X--> TO Y-->, AND
+* MOVE ROUTINE - MOVE D4 BYTES FROM X--> TO Y-->
+*
+* CALLED BY:
+* INPUT: A5 POINTS TO STRING TO MOVE, A6 TO WHERE TO PUT IT
+* OUTPUT: NO CHANGE
+* REGISTERS USED: NONE BESIDES A5 AND A6
+
+
+NAMOVE   MOVE.L   (A5),(A6)         MOVE FIRST FOUR BYTES
+         MOVE.L   4(A5),4(A6)       MOVE SECOND FOUR BYTES
+         MOVE.W   8(A5),8(A6)       THEN TWO MORE BYTES
+         MOVE.B   10(A5),10(A6)     AND THEN LAST BYTE
+         RTS
+
+*
+* CALLED BY:
+* INPUT: A5 POINTS TO STRING TO MOVE, A6 TO WHERE TO PUT IT
+*        D4 CONTAINS COUNT OF BYTES TO MOVE
+* OUTPUT: NO CHANGE
+* REGISTERS USED: D5 CHANGED
+
+MOVE     MOVE.L   D4,D5
+         TST.L    D5                 ALL DONE?
+MOVE0    BEQ.S    MOVEXI             YES
+         MOVE.B   (A5)+,(A6)+       MOVE ONE BYTE
+         SUB.L    #01,D5             DEC B
+         BRA.S    MOVE0              DO UNTIL DONE
+
+MOVEXI   RTS
+
+* GETNAM - PROCESS AND MOVE VALID FILE NAME FROM LINBUF
+* INTO FCB
+*
+* CALLED BY:
+* INPUT: A4 HAS FCB ADDRESS
+* OUTPUT: NAME, EXTENSION, AND DRIVE NUMBER PUT INTO FCB, UNLESS
+*   A DEVICE NAME IS FOUND, IN WHICH CASE $10+DEVNUM IS PUT IN
+* REGISTERS USED:
+
+
+GETNAM   MOVE.B   DEFDRV,FCBDRV(A4) USUALLY WORK DRV EXCEPT ON COMMANDS
+         MOVE.B   DEFDIR,DIRTMP     AND ALSO DIRECTORY
+         MOVE.B   WORKDR,DEFDRV     BACK TO WORK DRV JUST IN CASE
+         MOVE.B   WRKDIR,DEFDIR     AND ALSO DIRECTORY
+         CLR.B    FCBRW(A4)          CLEAR RW FLAG TO SHOW FILE CLOSED
+         CLR.B    FCBNAM(A4)         ERASE FIRST CHAR OF FILE NAME
+         CLR.B    FCBEXT(A4)         ERASE FIRST CHAR OF EXTENSION
+* SKIP SPACES
+         MOVE.L   LPOINT,A5         POINT TO BUFFER
+         JSR      SKIPSP               SKIP SPACES
+
+         MOVE.L   A4,A5             POINT BACK TO FCB
+         BSR.L    GETNX              GET FIRST CHARACTER
+         BCS.S    CHKSL1             IF NOT ALPHA CHECK /
+         CMP.B    #$41,D5            CHECK IF LETTER
+         BCC.S    CHKSL2             YES, GO GET A NAME OR DIR
+
+         SUB.B    #$30,D5            CVT FROM ASCII
+         CMP.B    MAXDRV,D5          CHECK AGAINST MAX DRIVE
+         BHI.L    NGEXIT             EXIT IF TOO BIG
+         MOVE.B   D5,D6             SAVE DRIVE NUMBER
+         BSR.L    GETNX              GET NEXT CHARACTER AFTER DRIVE NO.
+         CMP.B    #$2E,D5            MUST BE PERIOD
+         BNE.L    NGEXIT             IF NOT A PERIOD IT'S WRONG
+         MOVE.B   D6,FCBDRV(A4)     STORE VALID DRIVE NUMBER
+         CLR.B    DIRTMP             NEW DRV, DON'T DEFAULT DIR
+
+         BSR.L    GETNX              GET NEXT CHARACTER
+         BCC.S    CHKSL2
+CHKSL1   CMP.B    #'/',D5            IS / FIRST?
+         BNE.S    NGEXIT             ANYTHING ELSE IS BAD
+         MOVE.B   #0,DIRTMP         / FIRST MEANS ROOT
+         BSR.L    GETNX              THEN GET NEXT CHAR
+         BCS.S    NGEXIT             IF NOT ALPHANUMERIC
+         CMP.B    #$41,D5
+         BCS.S    NGEXIT             CAN'T BE A NUMBER
+         BRA.S    GNAME1             AND THEN CONTINUE WITH NAME
+* IF FIRST CHAR IS LETTER, CHECK IF / FOLLOWS IT
+CHKSL2   MOVE.L   LPOINT,A5
+         MOVE.B   (A5)+,D6          CHK CHAR AFTER FIRST LETTER
+         CMP.B    #'/',D6            IS IT /?
+         BNE.S    GNAME1             NO, GO GET NAME
+         CMP.B    FNCASE,D5          IS D5 LOWER THAN FNCASE?
+         BCS.S    DRVLOK             LEAVE AS IS IF YES
+         JSR      TOUPPR               NO, CVT TO UPPER CASE
+DRVLOK   MOVE.B   D5,DIRTMP         YES, SO SAVE CHAR
+         MOVE.L   A5,LPOINT         AND GO PAST THE /
+         BSR.L    GETNX              THEN GET NEXT CHAR
+         BCS.S    NGEXIT             IF NOT ALPHANUMERIC
+
+GNAME1   LEA.L    FCBNAM(A4),A5      POINT TO NAME
+         MOVE.B   #8,D6             UP TO 8 ALLOWED
+         BSR.L    GNOE1              GO GET NAME AND NEXT CHAR
+         BCC.S    NGEXIT             MUST BE FOLLOWED BY NON-ALPHA
+         CMP.B    #$2E,D5            PERIOD?
+         BNE.S    OKEXIT             EXIT IF NOT A PERIOD
+         BSR.L    GETNX              GET NEXT CHARACTER AFTER PERIOD
+         CMP.B    #$41,D5            LETTER?
+         BCS.S    GDRIV1             MAY BE DRIVE NUMBER ON END
+
+GEXT     MOVE.B   #3,D6             UP TO 3 ALLOWED
+         BSR.S    GNOE1              GET THE EXTENSION AND NEXT CHAR
+         BCC.S    NGEXIT             MUST BE FOLLOWED BY NON-ALPHA
+         CMP.B    #$2E,D5            PERIOD?
+         BEQ.S    GDRIVE             YES, GO GET DRIVE NUMBER
+         JSR      CLASF3               CLASSIFY IT
+         BCS.S    OKEXIT             EXIT IF NOT ALPHANUMERIC
+NGEXIT   MOVE.B   #21,FCBERR(A4)    INVALID FILE NAME ERROR
+         CLR.L    FCBNAM+4(A4)
+         CLR.L    FCBNAM+8(A4)       ZERO OUT BAD NAME
+         CLR.W    FCBNAM+12(A4)
+         CLR.B    FCBNAM+14(A4)
+         BSR.S    CPYDIR             MOVE OVER DIR BITS
+         DC.L     $003C0001 OR #1,CCR ALSO SET CARRY TO SIGNAL ERROR
+         RTS
+
+GDRIVE   BSR.L    GETNX              GET NUMBER
+GDRIV1   MOVE.L   A4,A5             POINT BACK TO FCB
+         SUB.B    #$30,D5            CVT FROM ASCII
+         CMP.B    MAXDRV,D5
+         BHI.S    NGEXIT             EXIT IF TOO BIG
+         MOVE.B   D5,FCBDRV(A4)     STORE IT
+         BSR.L    GETNX              GET NEXT CHARACTER
+         BCC.S    NGEXIT             NO GOOD IF ALPHANUMERIC
+OKEXIT   JSR      FINDEV               CHECK IF DEVICE AND CVT IF SO
+         BSR.S    CPYDIR             MOVE OVER DIR BITS
+         DC.L     $023C00FE AND #$FE,CCR CLEAR CARRY IF OK
+         RTS
+
+* IF DIRTMP <>0 THEN SET APPROPRIATE PARITY BITS
+CPYDIR   MOVE.B   DIRTMP,D5         GET DIRECTORY CHAR
+         LEA      FCBNAM+1(A4),A5      POINT TO 2ND CHAR OF NAME
+CPDLOO   LSL.B    #1,D5              SHIFT NEXT BIT INTO BIT 7
+         BEQ.S    CPDXND             QUIT IF ALL BITS DONE
+         BPL.S    CPDERO             IF >0 THEN IT'S ZERO
+         OR.B     #$80,(A5)           IF <0 THEN OR IN PARITY BIT
+CPDERO   LEA      1(A5),A5             THEN GO TO NEXT CHAR
+         BRA.S    CPDLOO             AND DO NEXT BIT/CHAR
+CPDXND   RTS
+
+* GET B CHARACTERS OF NAME OR EXT, PLACE AT A5->
+*     FOLLOW WITH ZEROES
+GNOE     BSR.L    GETNX              GET NEXT CHARACTER
+GNOE1    BCC.S    GISOK              OK TO USE IT
+         CMP.B    #$5F,D5            UNDERLINE?
+         BEQ.S    GISOK1             YES, ALSO OK
+         CMP.B    #$2D,D5            HYPHEN?
+         BEQ.S    GISOK1             YES, ALSO OK
+         CMP.B    #$2A,D5            ASTERISK?
+         BEQ.S    GISOK1             YES, ALSO OK
+         BRA.S    GZERO              ELSE FINISH WITH ZEROES AND QUIT
+GISOK    CMP.B    FNCASE,D5          IS D5 LOWER THAN FNCASE?
+         BCS.S    GISOK1             LEAVE AS IS IF YES
+         JSR      TOUPPR               NO, CVT TO UPPER CASE
+GISOK1   MOVE.B   D5,(A5)+          STORE IT
+         SUB.B    #01,D6             DECREMENT COUNTER
+         BNE.S    GNOE               CONTINUE UNTIL DONE
+         JMP      GETNX                GET NEXT CHAR AND RETURN
+GZERO    CLR.B    (A5)+              FINISH UP WITH ZEROES AT END
+         SUB.B    #01,D6             DECREMENT COUNTER
+         BNE.S    GZERO              CONTINUE UNTIL DONE
+         JSR      CLASF3               CLASSIFY LAST CHARACTER
+         RTS      AND EXIT
+
+* SKIP SPACES IN LINE BUFFER
+SKIPSP   MOVE.B   (A5)+,D5          GET NEXT CHARACTER
+         CMP.B    #$20,D5            SPACE?
+         BNE.S    SKIRTS             NO, EXIT WITH PREVIOUS LPOINT
+         MOVE.L   A5,LPOINT         SAVE POINTER TO NEXT AFTER SPACE
+SKIRTS   RTS      RTS AND RETURN
+
+* RESTRP - RESET ALL TRAP VECTORS
+
+RESTRP   TST.B    TRPFLG             DO WE WANT TO DO ALL TRAPS?
+         BEQ.S    RESTR1             NO, ONLY DO AXXX TRAP
+
+         LEA      OTRAPS,A5            POINT TO SK*DOS TRAP JSR'S
+         LEA      $8,A6                POINT TO FIRST EXCEPTION VECTOR
+         MOVE.B   #45,D7            DO TRAPS 2 THROUGH 47
+RETRL1   MOVE.L   A5,(A6)+          PUT IN NEXT VECTOR
+         ADD.L    #2,A5              POINT TO NEXT JSR
+         SUB.B    #1,D7              DECREMENT COUNTER
+         BNE      RETRL1
+
+         MOVE.B   #16,D7            THEN 16 UNASSIGNED, RESERVED
+RETRL2   MOVE.L   A5,(A6)+          PUT IN VECTOR
+         SUB.B    #1,D7              DECREMENT COUNTER
+         BNE      RETRL2               (ALL THESE USE SAME JSR)
+         ADD.L    #2,A5              POINT TO NEXT JSR
+
+         MOVE.B   #192,D7           THEN 192 USER INTERRUPT VECTORS
+RETRL3   MOVE.L   A5,(A6)+          PUT IN VECTOR
+         SUB.B    #1,D7              DECREMENT COUNTER
+         BNE      RETRL3               (ALL THESE USE SAME JSR)
+
+RESTR1   MOVE.L   #SDTRAP,A6        POINT TO $AXXX TRAP ENTRY POINT
+         MOVE.L   LATRAP,A5         POINT TO TRAP LOCATION
+         MOVE.L   A6,(A5)           PUT INTO VECTOR
+         RTS
+
+* >>> THIS FUNCTION IS ONLY FOR EXTERNAL USE VIA A DC <<<
+* INTOFF - TURN OFF ALL INTERRUPTS, SAVE PREVIOUS INTERRUPT MASK
+* IN LSTINT
+
+INTOFF   ADD.L    #4,A7              REMOVE JSR RETURN ADDRESS
+         MOVE.W   (A7),D7           USER'S OLD SR FROM STACK
+         MOVE.W   D7,LSTINT         SAVE IT
+         OR.W     #$0700,D7           MASK INTERRUPTS
+         MOVE.W   D7,(A7)           BACK TO STACK
+         MOVE.L   #USRFCB,A6        GIVE HIM A VPOINT
+         RTE      AND RETURN TO HIM
+
+* >>> THIS FUNCTION IS ONLY FOR EXTERNAL USE VIA A DC <<<
+*INTBON - TURN INTERRUPTS BACK ON TO MASK STORED IN LSTINT
+
+INTBON   ADD.L    #4,A7              REMOVE JSR RETURN ADDRESS
+         MOVE.W   LSTINT,D7         HIS OLD SR
+         AND.W    #$0700,D7          JUST THE IRQ BITS
+         MOVE.W   (A7),D6           HIS CURRENT SR
+         AND.W    #$F8FF,D6          WITHOUT CURRENT IRQ BITS
+         OR.W     D6,D7               COMBINE THE TWO
+         MOVE.W   D7,(A7)           GIVE HIM BACK HIS OLD IRQ BITS
+         MOVE.L   #USRFCB,A6        GIVE HIM A VPOINT
+         RTE      AND RETURN TO HIM
+
+* TOUPPER- CONVERT CHARACTER IN D5 INTO LOWER CASE
+
+TOUPPR   CMP.B    #$61,D5            a OR HIGHER?
+         BCS.S    TOUPEX             NO, EXIT
+         CMP.B    #$7B,D5            ABOVE z?
+         BCC.S    TOUPEX             YES, EXIT
+         AND.B    #$DF,D5            a-z BECOMES A-Z
+TOUPEX   RTS      AND THEN EXIT
+
+* DEFAULT GET DATE AND TIME ROUTINE - IF THERE IS NO
+* CLOCK/CALENDAR IC, THEN JUST GET DATE AS ENTERED AT BOOT
+
+DATONL   MOVE.L   MONTH,D5
+         LSR.L    #8,D5              MOVE DATE RIGHT IN D5
+         CLR.L    D6                 AND NO TIME
+         RTS
+
+* ROUTINE TO PRINT FILE NAMES
+* ENTER WITH A4-> FILE NAME, AND D5=0 IF NO SPACES TO BE INCLUDED
+
+FNPRNT   MOVEM.L  A5/D5-D6,-(A7)
+         LEA      1(A4),A5             POINT TO 2ND CHAR IN NAME
+         CLR.B    D5                 CLEAR DIR NAME
+         MOVE.W   #6,D6             COUNTER FOR 7 BITS
+
+FNLOO1   ASL.B    #1,D5              SHIFT DIR NAME
+         TST.B    (A5)+              CHECK A CHAR
+         BPL.S    FNBIT0             >0 IS A 0
+         ADD.B    #1,D5              <0 IS A 1
+FNBIT0   DBRA     D6,FNLOO1           THEN DO NEXT
+         MOVE.B   D5,DIRTMP         SAVE FOR DIR CMD
+         TST.B    D5                 ROOT DIR?
+         BNE.S    FNNOTR             NO, PRINT /X/
+         TST.B    D4                 CHECK D4
+         BEQ.S    FNPNAM             =0 MEANS NO SPACES
+         MOVE.B   #$20,D5
+         BSR.S    PCD5               PRINT TWO SPACES
+         BSR.S    PCD5
+         BRA.S    FNPNAM             THEN CONTINUE
+FNNOTR   BSR.S    PCD5               PRINT DIR LETTER
+         MOVE.B   #'/',D5
+         BSR.S    PCD5               PRINT /
+FNPNAM   MOVE.L   A4,A5             POINT BACK TO NAME
+         MOVE.W   #7,D6             COUNT 8 CHARS IN NAME
+FNLOO2   MOVE.B   (A5)+,D5          GET NEXT CHAR
+         AND.B    #$7F,D5            REMOVE PARITY
+         BNE.S    FNPNCH             PRINT IT IF THERE
+         MOVE.B   #$20,D5           ELSE REPLACE BY SPACE
+         TST.B    D4                 CHECK WHETHER TO PRINT
+         BEQ.S    FNNNCH             =0 MEANS NO SPACES
+FNPNCH   BSR.S    PCD5               PRINT CHAR OR SPACE
+FNNNCH   DBRA     D6,FNLOO2           REPEAT FOR 8 CHAR IN NAME
+         MOVE.B   #'.',D5
+         BSR.S    PCD5               PERIOD
+         MOVE.W   #2,D6             COUNT 3 CHARS IN EXT
+FNLOO3   MOVE.B   (A5)+,D5          GET NEXT CHAR
+         BNE.S    FNPECH             PRINT IT IF THERE
+         MOVE.B   #$20,D5           ELSE REPLACE BY SPACE
+         TST.B    D4                 CHECK WHETHER TO PRINT
+         BEQ.S    FNEXIT             =0 MEANS NO SPACES
+FNPECH   BSR.S    PCD5               PRINT CHAR OR SPACE
+FNNECH   DBRA     D6,FNLOO3           REPEAT FOR 3 CHAR IN EXT
+FNEXIT   MOVEM.L  (A7)+,A5/D5-D6
+         RTS
+PCD5     MOVEM.L  D6/A5,-(A7)
+         BSR.L    PUTCD5             PRINT A CHARACTER
+         MOVEM.L  (A7)+,D6/A5
+         RTS
+
+         EVEN
+
+*         LIB      1.TXIORED
+****************************************************
+* ICONTROL SELECT - PROCESS $0000-2 AND $FFFX CALLS;
+* PASS EVERYTHING ELSE THROUGH TO THE DRIVER
+****************************************************
+
+ICNTRS   CLR.L    D5
+         TST.W    D4                 CHECK FOR 00
+         BEQ.S    ICNT0              0 MEANS RETURN CURRENT DEVICE
+         CMP.W    #1,D4              CHECK FOR 01
+         BEQ.S    ICNT1              1 MEANS RETURN CURRENT NAME
+         CMP.W    #2,D4              CHECK FOR 02
+         BEQ.S    ICNT2              2 MEANS RETURN 8-BIT CHARME
+         CMP.W    #$FFF0,D4          CHECK FOR FFFX
+         BCC.S    ICNTX              FFFX MEANS SWITCH DEVICES
+         MOVE.B   DEVIN,D5          CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTICNT(A6,D5),A6
+         JMP      (A6)                 JUMP TO DEVICE ICNTRL
+ICNT0    MOVE.B   DEVIN,D5          GET CURRENT INPUT DEVICE
+         OR.B     #$04,CCR            SIGNAL SUCCESSFUL COMPLETION
+         RTS      AND RETURN
+ICNT1    MOVE.B   DEVIN,D5          GET CURRENT INPUT DEVICE
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTNAME(A6,D5),D5  GET NAME
+         OR.B     #$04,CCR            SIGNAL SUCCESSFUL COMPLETION
+         RTS
+ICNT2    MOVE.B   DEVIN,D5          CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTNECH(A6,D5),A6
+         JMP      (A6)                 JUMP TO DEVICE ICNTRL
+ICNTX    AND.B    #$0F,D4
+         MOVE.B   D4,DEVIN          CHANGE TO NEW INPUT DEVICE
+         OR.B     #$04,CCR            SIGNAL SUCCESSFUL COMPLETION
+         RTS
+
+****************************************************
+* OCONTROL SELECT - PROCESS $0000 AND $FFFX CALLS;
+* PASS EVERYTHING ELSE THROUGH TO THE DRIVER
+****************************************************
+
+OCNTRS   CLR.L    D5
+         TST.W    D4                 CHECK FOR 0
+         BEQ.S    OCNT0              0 MEANS RETURN CURRENT DEVICE
+         CMP.W    #1,D4              CHECK FOR 01
+         BEQ.S    OCNT1              1 MEANS RETURN CURRENT NAME
+         CMP.W    #$FFF0,D4          CHECK FOR FFFX
+         BCC.S    OCNTX              FFFX MEANS SWITCH DEVICES
+         MOVE.B   DEVOUT,D5         CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTOCNT(A6,D5),A6
+         JMP      (A6)                 JUMP TO DEVICE ICNTRL
+OCNT0    MOVE.B   DEVOUT,D5         GET CURRENT OUTPUT DEVICE
+         OR.B     #$04,CCR            SIGNAL SUCCESSFUL COMPLETION
+         RTS      AND RETURN
+OCNT1    MOVE.B   DEVOUT,D5         GET CURRENT OUTPUT DEVICE
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTNAME(A6,D5),D5  GET NAME
+         OR.B     #$04,CCR            SIGNAL SUCCESSFUL COMPLETION
+         RTS
+OCNTX    AND.B    #$0F,D4
+         MOVE.B   D4,DEVOUT         CHANGE TO NEW OUTPUT DEVICE
+         OR.B     #$04,CCR            SIGNAL SUCCESSFUL COMPLETION
+         RTS
+
+****************************************************
+* STATVS - SELECT INPUT STATUS DEVICE VIA TYPEHEAD
+****************************************************
+
+STATVS   TST.B    TPDFLG             TYPEAHEAD DISABLED?
+         BNE.S    STATU1             YES
+         CLR.L    D5
+         MOVE.B   DEVIN,D5          CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTINST(A6,D5),A6
+         JMP      (A6)                 JUMP TO DEVICE INPUT STAT
+
+****************************************************
+* STATU1 - SELECT INPUT STATUS DEVICE 1 CHAR ONLY
+****************************************************
+
+STATU1   CLR.L    D5
+         MOVE.B   DEVIN,D5          CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTSTA1(A6,D5),A6
+         JMP      (A6)                 JUMP TO DEVICE INPUT STAT
+
+****************************************************
+* OSTATS - SELECT OUTPUT STATUS DEVICE
+****************************************************
+
+OSTATS   CLR.L    D5
+         MOVE.B   DEVOUT,D5         CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTOUST(A6,D5),A6
+         JMP      (A6)                 JUMP TO DEVICE OUTPUT STAT
+
+****************************************************
+* KINPUS - KEYBOARD INPUT EIGHT BITS, NO ECHO
+*  VIA TYPEAHEAD BUFFER
+****************************************************
+
+KINPUS   TST.B    TPDFLG             TYPEAHEAD DISABLED?
+         BNE.S    KINPU1             YES
+* FIRST, CLEAR DEPTH COUNTER FOR CURRENT OUTPUT DEVICE
+         CLR.L    D5
+         MOVE.B   DEVOUT,D5         OUTPUT DEVICE NUMBER
+         MULU     #80,D5              X80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         ADD.L    D5,A6              POINT TO OUTPUT DEVICE'S ENTRY
+         CLR.B    DTDEPC(A6)         CLEAR DEPTH COUNTER
+         CLR.L    D5
+         MOVE.B   DEVIN,D5          CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTNECH(A6,D5),A6
+         JMP      (A6)                 JUMP TO DEVICE INPUT
+
+****************************************************
+* KINPU1 - KEYBOARD INPUT EIGHT BITS, NO ECHO
+*    LAST CHARACTER ONLY (BYPASS TYPEAHEAD BUFFER)
+****************************************************
+
+KINPU1   CLR.L    D5
+* FIRST, CLEAR DEPTH COUNTER FOR CURRENT OUTPUT DEVICE
+         MOVE.B   DEVOUT,D5         OUTPUT DEVICE NUMBER
+         MULU     #80,D5              X80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         ADD.L    D5,A6              POINT TO OUTPUT DEVICE'S ENTRY
+         CLR.B    DTDEPC(A6)         CLEAR DEPTH COUNTER
+         CLR.L    D5
+         MOVE.B   DEVIN,D5          CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTINE1(A6,D5),A6
+         JMP      (A6)                 JUMP TO DEVICE INPUT
+
+****************************************************
+* GETCHS - GET CHARACTER ROUTINE WITH DEVICE SELECT
+* HAS TWO ENTRY POINTS: GETCHS IS FOR MOST APPLICATIONS,
+* AND GETCFF IS USED WHEN READING FROM FILE WITH DEV>$10
+*   (IN WHICH CASE DEVNOW AND DEVADD ARE ALREADY SET)
+****************************************************
+
+GETCHS   CLR.L    D5
+* FIRST, CLEAR DEPTH COUNTER FOR CURRENT OUTPUT DEVICE
+         MOVE.B   DEVOUT,D5         OUTPUT DEVICE NUMBER
+         MULU     #80,D5              X80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         ADD.L    D5,A6              POINT TO OUTPUT DEVICE'S ENTRY
+         CLR.B    DTDEPC(A6)         CLEAR DEPTH COUNTER
+         CLR.L    D5
+         MOVE.B   DEVIN,D5          CURRENT DEVICE NUMBER
+         MOVE.B   D5,DEVNOW         STORE AS CURRENT DEVICE
+         CMP.B    #8,D5
+         BEQ.S    GETCHD             USE DISK WHEN 8
+         MULU     #80,D5              X80; ALL ELSE PASS THROUGH
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         ADD.L    D5,A6              POINT TO THIS DEVICE'S ENTRY
+         MOVE.L   A6,DEVADD         AND STORE IT
+GETCFF   MOVE.L   DEVADD,A6         POINT TO DEVICE ENTRY
+         MOVE.L   DTNECH(A6),A6     POINT TO NO-ECHO ENTRY
+         TST.B    TPDFLG             TYPEAHEAD DISABLED?
+         BEQ.S    GETCGO             NO, USE IT
+         MOVE.L   DEVADD,A6         YES, SO USE NON-TYPEAHEAD
+         MOVE.L   DTINE1(A6),A6
+GETCGO   JSR      (A6)                 GO GET THE CHARACTER
+         AND.L    #$7F,D5            MASK PARITY BIT
+CKECHO   TST.B    INECHO             ECHO?
+         BEQ.S    GTCHRT             NO, SO JUST RETURN
+         MOVEM.L  D5-D5,-(A7)      YES, SO SAVE IT AND ECHO
+         BSR.L    PUTCD5             GO ECHO IT
+         MOVEM.L  (A7)+,D5-D5      RESTORE CHARACTER
+GTCHRT   RTS      AND RETURNURN
+
+****************************************************
+* GETCHD - ROUTINE TO GET CHAR FROM DISK FILE IF ON
+
+GETCHD   TST.L    FIADDR             CHECK IF DISK FILE TO BE USED
+         BNE.S    GETDOK             DISK OK IF <>0
+         CLR.B    DEVIN              ELSE IN DEVICE NUMBER=0
+         BRA.L    GETCHS             AND TREAT NORMALLY
+
+* FOR DISK I/O (INDICATED BY FIADDR <>0) DO IT
+GETDOK   MOVEM.L  A3-A5,-(A7)
+         MOVE.L   FIADDR,A4         POINT TO FCB
+         MOVE.L   CURFCB,A3         SAVE CURRENT FCB ADDRESS
+         MOVE.L   A4,CURFCB
+         JSR      FREAD                HANDLE THE CHARACTER
+         MOVEM.L  A3-A3,CURFCB     RESTORE CURFCB W/O FLAGS
+         BEQ.S    PULXPC             EXIT IF NO ERROR
+         CLR.L    FIADDR             STOP TAKING INPUT FROM DISK
+         CLR.B    DEVIN              SWITCH BACK TO CONSOLE
+         JSR      PERROR               GO REPORT THE ERROR
+         MOVE.L   #QUEMSG,A4
+         JSR      PSTRNG               TELL HIM TO USE KBD
+         MOVEM.L  (A7)+,A3-A5
+         BRA.L    GETCHS             AND GO BACK TO DEVICE 0
+
+PULXPC   MOVEM.L  (A7)+,A3-A5
+         BRA.S    CKECHO             CHECK WHETHER TO ECHO
+
+QUEMSG   DC.B     '   END OF DISK INPUT ... CONTINUE FROM KEYBOARD.'
+
+
+
+
+         DC.B     $D,$A
+         DC.B     ': ',4
+
+****************************************************
+* PUTCHS WITH DEVICE SELECT HAS THREE ENTRY POINTS:
+*   PUTCHS IS FOR EXTERNAL USERS, CHAR IN D4
+*   PUTCD5 IS FOR INTERNAL USES, CHAR IN D5
+*   PUTCFF IS FOR WRITING TO FILE WITH DEVICE >$10, CHAR IN D4
+*     (IN WHICH CASE DEVNOW AND DEVADD ARE ALREADY SET)
+****************************************************
+
+PUTCFF   MOVE.B   D4,D5             ENTRY FROM FILE WRITE
+         MOVEM.L  D5-D5,-(A7)      SAVE CHARACTER
+         BRA.S    PUTCF1
+PUTCHS   MOVE.B   D4,D5             FOR EXTERNAL USERS
+PUTCD5   MOVEM.L  D5-D5,-(A7)      SAVE CHARACTER
+PUTDNG   CLR.L    D5
+         MOVE.B   DEVOUT,D5         CURRENT DEVICE NUMBER
+         MOVE.B   D5,DEVNOW         STORE AS CURRENT DEVICE
+         CMP.B    #8,D5
+         BEQ.L    PUTCHD             USE DISK WHEN 8
+         MULU     #80,D5              ALL ELSE FALL THROUGH
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         ADD.L    D5,A6              POINT TO THIS DEVICE'S ENTRY
+         MOVE.L   A6,DEVADD         AND STORE IT
+PUTCF1   MOVE.L   DEVADD,A6         POINT TO DEVICE ENTRY
+         MOVE.L   (A7),D5           RESTORE THE CHARACTER
+         TST.B    SPECIO             CHECK FOR SPECIAL I/O
+         BNE.S    PUTCH1             MEANS IGNORE WIDTH
+         CMP.B    #$20,D5            IS IT CONTROL CHAR?
+         BCC.S    PUTCH0
+         MOVE.B   #1,DTOCOL(A6)     CURRENT COLUMN = 1
+         BRA.S    PUTCH1             AND THEN CONTINUE
+
+* ON PRINTABLE CHARACTER, CHECK COLUMN
+PUTCH0   ADD.B    #1,DTOCOL(A6)      INC CURRENT COLUMN
+         MOVE.B   DTPWID(A6),D6     CHECK DESIRED WIDTH
+         BEQ.S    PUTCH1             ZERO MEANS NO WIDTH DESIRED
+         CMP.B    DTOCOL(A6),D6      COMPARE WITH CURRENT COLUMN
+         BCC.S    PUTCH1             NOT PAST WIDTH YET
+         CMP.B    #$20,D5            IS CURR CHAR A SPACE?
+         BNE.S    PUTCH1             NO, DON'T DO CRLF
+         JSR      PCRLF                YES, DO CRLF ON SPACE PAST WIDTH
+
+PUTCH1   MOVEM.L  (A7)+,D5-D5      RESTORE CHARACTER
+         CMP.B    #$0D,D5            IS IT CR?
+         BNE.L    PUTCH5             NO, SO JUST OUTPUT IT
+         MOVE.L   DEVADD,A6         POINT TO DEVICE ENTRY
+         TST.B    DTPAUS(A6)         SHOULD WE PAUSE?
+         BEQ.S    NOPAUS             NO
+MAYPAU   MOVE.B   DTPLIN(A6),D7     GET PAGE LINES
+         BEQ.S    NOPAUS             NO PAUSE IF 0
+         CMP.B    DTDEPC(A6),D7      TIME TO PAUSE?
+         BEQ.S    PUTCH3
+NOPAUS   BSR.L    STATU1             ELSE CHECK KB FOR SOMETHING
+         BEQ.L    PUTCH4             NOTHING THERE
+         BSR.L    KINPU1             IF SOMETHING, GET IT W/O ECHOING
+         AND.B    #$7F,D5            MASK PARITY
+         CMP.B    ESCAPE,D5          ESCAPE?
+         BNE.L    PUTCH4             NO, GO DO IT
+PUTCH3   BSR.L    KILLU1             CLEAR TYPEAHEAD IF ESCAPE
+         MOVE.L   DEVADD,A6         POINT TO DEVICE ENTRY
+         CLR.B    DTDEPC(A6)         CLEAR DEPTH COUNTER
+         BSR.L    KINPUS             ELSE STOP AND GET ONE MORE
+         AND.B    #$7F,D5            MASK PARITY
+         CMP.B    ESCAPE,D5          ESCAPE?
+         BEQ.S    PUTCH4             YES, CONTINUE WITH CR
+         CMP.B    #$0D,D5            CR?
+         BNE.S    PUTCH3             NO, KEEP WAITING
+
+* DETECTED A BREAK, GO DO IT
+ESCAP    MOVE.L   BREAK,A6          GET THE BREAK ADDRESS
+         CMP.L    #WARMSV,A6         IS IT WARMSTART?
+         BEQ.L    WARMS              YES, GO TO IT
+         TST.B    CMFLAG             CHECK IF EXTERNAL EXECSD USED
+         BNE.S    ESCAXT             YES, SO RESTORE EVERYTHING
+         SUB.L    #8,A7              MAKE ROOM ON STACK
+         MOVE.W   EXECSR,(A7)       PUT USER'S SR ON IT
+         MOVE.L   A6,2(A7)          AND HIS RETURN ADDRESS
+         CLR.W    6(A7)              CLEAR 68010/20 FORMAT
+         MOVE.L   #USTACK,A6
+         MOVE.L   A6,USP            INITIALIZE HIS STACK POINTER
+         RTE      AND GO TO HIM IN USER MODE
+
+* IF EXECUTING EXTERNAL EXECSD, RESTORE EVERYTHING
+ESCAXT   CLR.B    CMFLAG             YES, SO CLEAR FOR NEXT TIME
+         MOVE.L   LPTSAV,A6
+         MOVE.L   A6,LPOINT         RESTORE LPOINT AFTER EXECSD
+         MOVE.L   ESUSTP,A6
+         MOVE.L   A6,USP            RESET USER'S STACK POINTER
+         MOVE.L   ESSSTP,A7         RESET SYSTEM STACK POINTER
+         MOVEM.L  (A7)+,D0-D4/A0-A4 RESTORE ALL REGISTERS
+         MOVE.B   ERRTYP,D5
+         RTS      AND RETURN TO TRAP ROUTINE
+
+PUTCH4   MOVEM.L  DEVADD,A6-A6
+         MOVE.B   #$0D,D5           RESTORE CR
+PUTCH5   JSR      PUTXOF               CHECK XOFF AND OUTPUT
+         CMP.B    #$0A,D5            WAS IT A LF?
+         BNE.S    PUTCH7             NO, JUST RETURN
+         CLR.L    D5
+         MOVE.B   DTNULL(A6),D5     NULL WAIT CONSTANT
+         LSL.L    #8,D5              X256
+         ADD.L    #1,D5              FORCE 0 TO BE SHORTEST
+CRLFWA   SUB.L    #1,D5
+         BNE.S    CRLFWA             WAIT LOOP
+         MOVE.B   DTPLIN(A6),D5     CHECK IF WE'RE COUNTING LF'S
+         BEQ.S    PUTCH7             NO, JUST GO ON
+         ADD.B    #1,DTDEPC(A6)      YES, INCREMENT COUNTER
+         CMP.B    DTDEPC(A6),D5      COMPARE WITH COUNTER
+         BCC.S    PUTCH7             NOT GREATER, KEEP GOING
+         MOVE.B   #1,DTDEPC(A6)     RESET COUNTER
+         MOVE.B   DTSLIN(A6),D5     GET EJECT COUNT
+         BEQ.S    PUTCH7             JUST CONTINUE IF NO EJECTION
+         MOVEM.W  D5-D5,-(A7)      ELSE PUT ON STACK
+PUTCH6   MOVE.B   #$0A,D5           GET LINE FEED
+         JSR      PUTXOF               CHECK XOFF AND OUTPUT
+         SUB.B    #1,1(A7)           DECREMENT COUNTER
+         BNE.S    PUTCH6             REPEAT UNTIL DONE
+         ADD.L    #2,A7              FIX UP STACK AND DROP THRU TO
+PUTCH7   RTS
+
+* CHECK FOR X-OFF AND OUTPUT THE DESIRED CHARACTER
+PUTXOF   TST.B    DTXOFF(A6)         CHECK WHETHER X-OFF ACTIVE
+         BEQ.S    PUTXGO             NO SO OUTPUT D5
+         MOVE.L   DTINST(A6),A6     CHECK DEVICE FOR SOMETHING
+         MOVEM.L  D5-D5,-(A7)      SAVE CHARACTER
+         JSR      (A6)
+         MOVEM.L  (A7)+,D5-D5      RESTORE CHARACTER
+         MOVEM.L  DEVADD,A6-A6
+         BEQ.S    PUTXGO             NOTHING THERE SO OUTPUT D5
+         MOVEM.L  D5-D5,-(A7)      SAVE CHARACTER
+         MOVE.L   DTNECH(A6),A6     IF SOMETHING, GET IT W/O ECHOING
+         JSR      (A6)
+         MOVE.L   DEVADD,A6
+         AND.B    #$7F,D5            MASK PARITY
+         CMP.B    DTXOFF(A6),D5      IS IT X-OFF?
+         MOVEM.L  (A7)+,D5-D5      RESTORE CHARACTER
+         BNE.S    PUTXGO             NO, OUTPUT
+PUTXWT   MOVEM.L  D5-D5,-(A7)      SAVE CHAR AGAIN
+         MOVE.L   DTNECH(A6),A6     ELSE STOP AND GET ONE MORE
+         JSR      (A6)
+         MOVE.L   DEVADD,A6
+         AND.B    #$7F,D5            MASK PARITY
+         CMP.B    DTXON(A6),D5       X-ON?
+         MOVEM.L  (A7)+,D5-D5      RESTORE CHARACTER
+         BNE.S    PUTXWT             NO, KEEP WAITING
+PUTXGO   MOVE.L   DTOUTC(A6),A6     FINALLY, OUTPUT IT
+         JSR      (A6)
+         MOVE.L   DEVADD,A6
+         RTS
+
+* FOR DISK I/O (INDICATED BY FOADDR <>0) DO IT
+PUTCHD   TST.L    FOADDR             CHECK IF DISK FILE TO BE USED
+         BNE.S    PUTDOK             DISK OK IF <>0
+         CLR.B    DEVOUT             ELSE OUT DEVICE NUMBER=0
+         BRA.L    PUTDNG             AND TREAT NORMALLY
+PUTDOK   MOVEM.L  A3-A5/D4,-(A7)
+         MOVE.L   16(A7),D4         CHARACTER INTO D4
+         ADD.B    #1,DEFCOL          NEXT COLUMN FOR DEVICE 8
+         CMP.B    #$20,D4
+         BCC.S    PUTDK2             IF IT'S NOT A CONTROL
+         MOVE.B   #1,DEFCOL         COL=1 IF CONTROL CHAR
+PUTDK2   MOVE.L   FOADDR,A4         POINT TO FCB
+         MOVE.L   CURFCB,A3         SAVE CURRENT FCB ADDRESS
+         MOVE.L   A4,CURFCB
+         JSR      FWRITE               HANDLE THE CHARACTER
+         MOVEM.L  A3-A3,CURFCB     RESTORE CURFCB W/O FLAGS
+         BNE.S    PDEROR             IF AN ERROR
+         MOVEM.L  (A7)+,A3-A5/D4
+         MOVEM.L  (A7)+,D5-D5
+         RTS      ELSE RETURN
+
+PDEROR   CLR.L    FOADDR             SO ERROR MSG DOESN'T GO TO DISK
+         JSR      PERROR               GO REPORT THE ERROR
+         JMP      WARMS                AND THEN QUIT
+
+*******************************************************
+
+* RESET DEVICE TABLE: COPY DEFAULT INTO ALL 8 ENTRIES EXCEPT NAME.
+* HAS TWO ENTRY POINTS: RESDEV RESETS EVERYTHING AND IS DONE ON
+* COLDSTART, AND RESDV1 RESETS ONLY DEVICE NUMBERS, AND IS DONE
+* ON EVERY WARMSTART.
+
+RESDEV   LEA      DEVTAB(PC),A5        POINT TO BEGINNING OF DEVICE TABLE
+         LEA      DEVDEF(PC),A6        DEFAULT ENTRY
+REDLOO   LEA      -4(A6),A6            BACKUP 4 BYTES
+         MOVE.L   80(A6),0(A6)      AND COPY 4 BYTES
+         CMP.L    A5,A6              CHECK IF DONE
+         BNE.S    REDLOO             REPEAT UNTIL DONE
+         MOVE.L   #$4E554C4C,560(A5) DEVICE 7='NULL'
+         LEA      NULRTS(PC),A6        DUMMY RTS
+         MOVE.L   A6,592(A5)        INTO OUTPUT STATUS CHECK
+         MOVE.L   A6,596(A5)        AND OUTPUT CHAR ROUTINE
+         MOVE.L   A6,600(A5)        AND OUTPUT CONTROL
+RESDV1   MOVE.B   #0,DEVIN          CURRENT INPUT  DEVICE = 0
+         MOVE.B   #0,DEVOUT         CURRENT OUTPUT DEVICE = 0
+         MOVE.B   #1,DEVERR         CURRENT ERROR  DEVICE = 1
+         MOVE.B   #2,DEVPRT         CURRENT PRINT  DEVICE = 2
+         NOP
+         NOP
+         RTS
+NULRTS   AND.B    #$FB,CCR           RETURN NON-ZERO
+         RTS
+
+*******************************************************
+
+* FINDEV - FIND A DEVICE.
+* ENTER: A4 POINTS TO AN FCB WHICH HAS LOGICAL DEVICE NAME (NO EXT)
+* EXIT: IF FOUND IN DEVTAB, THEN PUT $10+DEVICE NUMBER INTO FCBDRV.
+*       IF NOT FOUND, LEAVE NUMBER UNCHANGED AND RETURN ERROR 4
+* USES: D7
+
+FINDEV   MOVE.B   FCBEXT(A4),D7     CHECK EXTENSION
+         BNE.S    FINDV4             ERROR 4 IF EXTENSION EXISTS
+         MOVE.L   FCBNAM+4(A4),D7   CHECK DEVICES < 5 LETTERS
+         BNE.S    FINDV4             ERROR IF LENGTH >4
+         MOVE.L   FCBNAM(A4),D7     ELSE LOAD NAME
+         CMP.L    DEVTAB,D7          CHECK FIRST NAME
+         BEQ.S    ISDEV0             FOUND DEVICE 0
+         CMP.L    DEVTAB+80,D7       CHECK NEXT NAME
+         BEQ.S    ISDEV1             FOUND DEVICE 1
+         CMP.L    DEVTAB+160,D7
+         BEQ.S    ISDEV2
+         CMP.L    DEVTAB+240,D7
+         BEQ.S    ISDEV3
+         CMP.L    DEVTAB+320,D7
+         BEQ.S    ISDEV4
+         CMP.L    DEVTAB+400,D7
+         BEQ.S    ISDEV5
+         CMP.L    DEVTAB+480,D7
+         BEQ.S    ISDEV6
+         CMP.L    DEVTAB+560,D7      CHECK LAST NAME
+         BEQ.S    ISDEV7             FOUND DEVICE 7
+FINDV4   MOVE.B   #4,FCBERR(A4)
+         RTS      AND RETURN
+
+ISDEV0   MOVE.B   #$10,FCBDRV(A4)   DEVICE X IS DRIVE $1X
+         BRA.S    FINDVX             AND FINISH
+ISDEV1   MOVE.B   #$11,FCBDRV(A4)
+         BRA.S    FINDVX
+ISDEV2   MOVE.B   #$12,FCBDRV(A4)
+         BRA.S    FINDVX
+ISDEV3   MOVE.B   #$13,FCBDRV(A4)
+         BRA.S    FINDVX
+ISDEV4   MOVE.B   #$14,FCBDRV(A4)
+         BRA.S    FINDVX
+ISDEV5   MOVE.B   #$15,FCBDRV(A4)
+         BRA.S    FINDVX
+ISDEV6   MOVE.B   #$16,FCBDRV(A4)
+         BRA.S    FINDVX
+ISDEV7   MOVE.B   #$17,FCBDRV(A4)
+FINDVX   CLR.B    ERRTYP
+         CLR.B    FCBERR(A4)         NO ERROR
+         RTS      AND RETURN
+
+****************************************************
+* KILLU1 - ERASE TYPEAHEAD BUFFER IN SELECTED DEVICE
+****************************************************
+
+KILLU1   CLR.L    D5
+         MOVE.B   DEVIN,D5          CURRENT INPUT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A6        POINT TO DEVICE TABLE
+         MOVE.L   DTKILL(A6,D5),A6
+         JMP      (A6)                 JUMP TO ERASE TYPEAHEAD
+
+         EVEN
+
+*         LIB      1.TXFMS1
+
+* FCS INITIALIZATION
+*
+* CALLED BY: USER
+* INPUT:
+* OUTPUT:
+* REGISTERS USED: D5, A6
+
+
+FCSINI   MOVEM.L  A4/A5,-(A7)      PUSH FCB POINTER
+         MOVE     SR,D5               AND SAVE CCR
+         MOVEM.W  D5-D5,-(A7)
+         JSR      DIWARM               DO DISK DRIVER INITIALIZATION
+         JSR      SECWAR               AND SECONDARY INITIALIZATION
+         BRA.S    CLRDTB             CLEAR DRIVE TABLE AND EXIT
+
+* FCSCLS - CLOSE ALL OPEN FILES
+*
+* CALLED BY: USER AND DOS
+* INPUT: NONE
+* OUTPUT: A5 POINTS TO BAD FCB ON CLOSING ERROR
+* REGISTERS USED: A5, A6, D5 (PRESERVES A4)
+
+FCSCLS   MOVEM.L  A4/A5,-(A7)      SAVE FCB POINTER
+         CLR.B    ERRTYP
+FCSCL0   MOVE.L   FBAPTR,D5         LOOK AT FCB LIST POINTER
+         BEQ.S    FCSEXT             STOP IF NOTHING ELSE IS OPEN
+         MOVE.L   D5,A4
+
+FCSCL1   SUB.L    #FCBLST,A4         POINT TO BEGINNING OF OPEN FCB
+         MOVE.L   A4,CURFCB         CURRENT FCB
+         CLR.B    ERRTYP
+         CLR.B    FCBERR(A4)
+         BSR.L    FCS4               GO CLOSE THIS FILE
+         BNE.S    FCSCL2             IF ERROR
+         BRA.S    FCSCL0             ELSE GO CLOSE THE NEXT FILE
+
+FCSCL2   MOVE.L   A4,4(A7)          ON ERROR A5 WILL HAVE ADDR OF BAD FCB
+         CLR.L    FBAPTR             FORCE ALL FILES OFF LINE
+         MOVE.B   #13,D5            ERROR 13 = CLOSE FILE ERROR
+         JSR      RPTER0               GO REPORT IT
+         MOVE.B   #13,ERRTYP        STORE IT
+FCSEXT   MOVE     SR,D5               SAVE CCR
+         MOVEM.W  D5-D5,-(A7)
+CLRDTB   MOVE.L   #DRTABL,A6        READY TO ERASE DRIVE DATA TABLE
+         MOVE.W   #24,D5            100 BYTES WORTH: 100/4-1
+FCSEX1   CLR.L    (A6)+
+         DBRA     D5,FCSEX1
+
+* CLEAR RANDOM FILE MEMORY
+
+         MOVE.L   #-1,RANADD        ERASE FCB ADDRESS MEMORY
+         CLR.W    FMTRSE             AND TRACK 00
+
+         MOVEM.W  (A7)+,D5-D5
+         MOVE     D5,CCR              RESTORE REGISTERS AND QUIT
+         MOVEM.L  (A7)+,A4/A5
+         RTS
+
+* FCS - FILE MANAGEMENT SYSTEM
+*
+* FREAD - READ NEXT BYTE FROM FILE PREVIOUSLY OPENED.
+*   TWO ENTRY POINTS - FREAD INTERNAL, AND FREADO EXTERNAL
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+* EXTERNAL ENTRY POINT - CHECKS THAT FILE REALLY IS OPEN
+FREADO   MOVEM.L  A4-A4,-(A7)
+
+* CHECK WHETHER READ FROM DEVICE OR FILE
+
+         MOVE.B   FCBDRV(A4),D5     GET DRIVE NUMBER
+         CMP.B    #10,D5             CHECK IF <9
+         BCC.L    FCS0DR             DO DEVICE READ IF >=10
+         MOVE.B   FCBRW(A4),D5      CHECK IF FILE ALREADY OPEN
+         CMP.B    #1,D5
+         BEQ.S    FCS0R              YES, IT'S OPEN FOR READ
+         CMP.B    #3,D5
+         BEQ.S    FCS0R              YES, IT'S OPEN FOR UPDATE
+         CMP.B    #83,D5
+         BEQ.S    FCS0R              YES, DITTO
+         MOVE.B   #30,ERRTYP        ELSE ERROR 30
+         BRA.L    F0REXT             AND EXIT
+
+* INTERNAL ENTRY POINT
+FREAD    MOVEM.L  A4-A4,-(A7)
+
+* CHECK WHETHER READ FROM DEVICE OR FILE
+
+         MOVE.B   FCBDRV(A4),D5     GET DRIVE NUMBER
+         CMP.B    #10,D5             CHECK IF <9
+         BCC.L    FCS0DR             DO DEVICE READ IF >=10
+
+* READ NEXT BYTE FROM FILE
+
+FCS0R    CLR.B    SCFLAG             CLR SCFLAG CLEAR SP COMPR FLAG
+         MOVE.B   FCBSCF(A4),D5     CHECK SPACE COMPRESSION FLAG
+         BEQ.S    FCS0RD             ZERO MEANS COMPR, BUT READ
+         BMI.S    FCS0RD             >128 MEANS NO COMPR
+         SUB.B    #1,FCBSCF(A4)      ELSE DECREMENT COUNTER
+         BRA.S    GIVESP             AND GO GIVE A SPACE
+FCS0RD   TST.B    FCBDPT(A4)         CHECK DATA POINTER
+         BEQ.S    FCS0RN             0 MEANS MUST START NEW SECTOR
+
+* WHILE STILL IN CURRENT SECTOR
+FCS0R0   CLR.L    D6
+         MOVE.B   FCBDPT(A4),D6     GET DATA POINTER TO NEXT BYTE
+         CLR.L    D5                 CLEAR REST OF D5 REGISTER
+         MOVE.B   FCBDAT(A4,D6),D5  GET NEXT BYTE FROM DATA
+         ADD.B    #1,FCBDPT(A4)      INCREMENT POINTER TO NEXT
+         TST.B    SCFLAG             WAITING FOR SP COMPR COUNT?
+         BEQ.S    FCS0R1             NO, JUST GO ON
+         SUB.B    #01,D5             YES, SUBTRACT ONE FROM COUNT
+         MOVE.B   D5,FCBSCF(A4)     STORE IN FCB
+GIVESP   CLR.L    D5
+         MOVE.B   #$20,D5           SUBSTITUTE FIRST SPACE
+         BRA.S    F0REXT             AND EXIT
+
+FCS0R1   CMP.B    #$09,D5            POSSIBLE SPACE COMPR?
+         BNE.S    F0REXT             NO, SO JUST RETURN IT
+         TST.B    FCBSCF(A4)         SHOULD WE DECOMPRESS IT?
+         BNE.S    F0REXT             NO, JUST RETURN IT
+         MOVE.B   D5,SCFLAG         YES, SO SET FLAG AND ...
+         BRA.S    FCS0RD             ...GO GET A COUNT
+F0REXT   JSR      CPYERR               CHECK AND MOVE ERROR IF ANY
+         BNE.S    F0REX2             EXIT ON ERROR
+         TST.B    D5                 CHECK CHARACTER BEING RETURNED
+         BNE.S    F0REX1             NOT ZERO, OK TO EXIT
+         MOVE.L   (A7),A4           POINT BACK TO FCB
+         TST.B    FCBSCF(A4)         SPACE COMPRESSING?
+         BPL.W    FCS0R              YES, ZERO IS INVALID SO READ NEXT
+F0REX1   CLR.L    D6                 RESET EQUALS FLAG
+F0REX2   MOVEM.L  (A7)+,A4-A4
+         RTS
+
+* WHEN FCBDPT=0 WE NEED A NEW SECTOR
+
+* ON RANDOM READ, CHECK IF CURRENT SECTOR HAS BEEN UPDATED ...
+* IF YES, THEN WRITE IT BACK BEFORE READING TO NEXT
+
+FCS0RN   TST.B    FCBRAN(A4)         CHECK IF RANDOM
+         BEQ.S    RF0REX             NO, JUST EXIT
+         TST.B    FCBRW(A4)          HAS IT BEEN UPDATED?
+         BPL.S    RF0REX             NO, JUST CONTINUE
+         AND.B    #$0F,FCBRW(A4)     ERASE UPDATE FLAG
+         JSR      FCS10                WRITE BACK THE SECTOR
+         BNE.S    F0REXT               IF ERROR
+
+RF0REX   MOVE.W   FCBDAT(A4),D6     CHECK T-S POINTER
+         BEQ.S    F0REOF               ON EOF GO DO ERROR 8
+         MOVE.W   D6,FCBCTR(A4)     ELSE STORE NEW AS CURRENT T-S
+         JSR      FCS9                 GO READ NEXT SECTOR
+         BNE.S    F0REXT               EXIT ON ERROR
+         MOVE.W   FCBDAT+2(A4),FCBCRN(A4) CURRENT REC NUM FROM FILE
+         MOVE.B   #4,FCBDPT(A4)     START READING WITH BYTE 4
+         BRA      FCS0R0               NOW GO PROCESS THE BYTE
+
+* AT END OF FILE, GENERATE ERROR 8
+F0REOF   MOVE.B   #8,ERRTYP         ERROR 8
+         BRA.S    F0REXT               AND EXIT
+
+* FREAD FROM DEVICE
+
+FCS0DR   SUB.B    #$10,D5            CVT 10-17 TO 0-7
+         CMP.B    #7,D5              CHECK FOR VALID DEVICE
+         BCC.L    FCS0R              DO AS FOR FILE IF NOT GOOD
+         AND.L    #$FF,D5            CLEAR REST OF REGISTER
+         MOVE.B   D5,DEVNOW         CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A4
+         ADD.L    D5,A4              POINTER TO DEVICE'S ENTRY IN DEVTAB
+         MOVE.L   A4,DEVADD         POINTER TO CURRENT ENTRY IN
+         JSR      GETCFF               USE GETCH TO GET CHAR
+         MOVE.L   DEVADD,A4
+         CMP.B    DTEOFI(A4),D5      CHECK FOR END-OF-FILE CHARACTER
+         BEQ.S    F0REOF             GENERATE ERROR 8 IF SO
+         JSR      CPYERR               COPY ERROR
+         BRA.L    F0REX2             THEN EXIT WITH ZERO
+
+*
+* FWRITE - WRITE NEXT BYTE TO FILE PREVIOUSLY OPENED.
+*  TWO ENTRY POINTS: FWRITE INTERNAL, FWRITO EXTERNAL
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+* EXTERNAL ENTRY POINT - CHECKS THAT FILE REALLY IS OPEN
+FWRITO   MOVEM.L  A4-A4,-(A7)
+
+* CHECK WHETHER WRITE TO DEVICE OR FILE
+
+         MOVE.B   FCBDRV(A4),D5     GET DRIVE NUMBER
+         CMP.B    #10,D5             CHECK IF <9
+         BCC.L    FCS0DW             DO DEVICE READ IF >=10
+         MOVE.B   FCBRW(A4),D5      CHECK IF FILE ALREADY OPEN
+         CMP.B    #2,D5
+         BEQ.S    FCS0W              YES, IT'S OPEN FOR WRITE
+         CMP.B    #3,D5
+         BEQ.S    FCS0W              YES, IT'S OPEN FOR UPDATE
+         CMP.B    #83,D5
+         BEQ.S    FCS0W              YES, DITTO
+         MOVE.B   #30,ERRTYP        ERROR 30
+         BRA.L    F0RITX             AND EXIT
+
+* INTERNAL ENTRY POINT
+FWRITE   MOVEM.L  A4-A4,-(A7)
+
+* CHECK WHETHER WRITE TO DEVICE OR FILE
+
+         MOVE.B   FCBDRV(A4),D5     GET DRIVE NUMBER
+         CMP.B    #10,D5             CHECK IF <9
+         BCC.L    FCS0DW             DO DEVICE READ IF >=10
+
+* SPACE COMPRESSION IS NOT ALLOWED ON RANDOM FILES
+FCS0W    TST.B    FCBRAN(A4)         IS IT A RANDOM FILE?
+         BEQ.S    FCS0WN             NO, NOT RANDOM
+         MOVE.B   #$FF,FCBSCF(A4)   YES, TURN OFF SPACE COMPRESSION
+
+FCS0WN   TST.B    FCBSCF(A4)         SPACE COMPRESSION?
+         BMI.S    F0WRI1             NO, SO JUST WRITE CHARACTER AND QUIT
+
+* 0-7F MEANS COMPRESSION, SO COMPRESS
+F0COMP   CMP.B    #$20,D4            IS CURRENT CHARACTER A SPACE?
+         BNE.S    F0NOSP             NO, SO GO WRITE PREVIOUS IF ANY
+         ADD.B    #1,FCBSCF(A4)      YES, SO INCREMENT COUNTER
+         CMP.B    #$7F,FCBSCF(A4)    CHECK COUNTER FOR MAXIMUM NUMBER
+         BCC.S    F0WOUT             IF >126, GO OUTPUT IT
+F0WEXK   CLR.L    D5                 ELSE ERASE ERROR FLAG
+F0WEX    MOVEM.L  (A7)+,A4-A4
+         RTS
+
+*IF MORE THAN 126 SPACES, OUTPUT AND RESET
+F0WOUT   MOVE.B   #$09,D4           TAB
+         BSR.S    F0WRIT             WRITE IT OUT
+         BNE.S    F0WEX              EXIT ON ERROR
+         MOVE.B   FCBSCF(A4),D4     GET SPACE COUNT
+         CLR.B    FCBSCF(A4)         CLEAR IT IN FCB
+         BSR.S    F0WRIT             WRITE IT OUT
+         BEQ.S    F0WOUK             IF NO ERROR
+         MOVE.B   #$20,D4           RESTORE THE SPACE, KEEP ERROR
+         BRA.S    F0WEX              AND RETURN WITH ERROR
+F0WOUK   MOVE.B   #$20,D4           RESTORE THE SPACE
+         BRA.S    F0WEXK             AND RETURN W/O ERROR
+
+* IF CURRENT IS NOT A SPACE, OUTPUT IT
+F0NOSP   MOVE.B   D4,FCBSCF+2(A4)   TEMPORARILY SAVE CHARACTER
+         MOVE.B   FCBSCF(A4),D6     GET SPACE COUNT
+         BEQ.S    F0WRI1             NO COMPRESSED SPACES IF 0
+         CMP.B    #1,D6              SEE IF ONLY 1 SPACE
+         BNE.S    COMPRE             DO COMPRESSED IF >1
+         MOVE.B   #$20,D4           ELSE OUTPUT A PLAIN SPACE
+         BRA.S    JUST1
+COMPRE   MOVE.B   #$09,D4           ELSE OUTPUT TAB FIRST
+         BSR.S    F0WRIT             WRITE IT OUT
+         BNE.S    F0WEX              EXIT ON ERROR
+         MOVE.B   FCBSCF(A4),D4     GET SPACE COUNT
+JUST1    CLR.B    FCBSCF(A4)         CLEAR IT IN FCB
+         BSR.S    F0WRIT             WRITE IT OUT
+         BNE.S    F0WEX              EXIT ON ERROR
+         MOVE.B   FCBSCF+2(A4),D4   RESTORE CHARACTER
+         BRA.L    F0WRI1             OUTPUT IT AND QUIT
+
+* ROUTINE TO OUTPUT CHARACTER IN D4
+F0WRIT   MOVEM.L  A4-A4,-(A7)
+
+F0WRI1   MOVE.W   FCBCRN(A4),D5     CURRENT RECORD NUMBER
+         BEQ.S    F0NEW              NOT YET INITIALIZED IF 0000 OR FFXX
+         AND.W    #$FF00,D5
+         CMP.W    #$FF00,D5          CHECK FOR $FFXX
+         BNE      F0OLD                IS INITIALIZED IF NOT 0000 OR FFXX
+         CLR.B    FCBCRN(A4)         CHANGE FF TO 00 IF NEEDED
+
+* WHEN FCBCRN=0 OR FFXX, FILE HAS JUST BEEN OPENED AND THIS
+* IS THE FIRST BYTE TO BE WRITTEN TO IT
+F0NEW    JSR      GRABIT                 GO GRAB A FREE SECTOR
+         BNE      F0RITX
+         MOVE.W   FCBLTR(A4),D6       LAST TR-SEC SO FAR
+         MOVE.W   D6,FCBFTR(A4)       IT'S ALSO THE FIRST TR-SEC
+         MOVE.W   D6,FCBCTR(A4)       AND ALSO CURRENT TR-SEC
+
+* ON FIRST WRITE TO RANDOM FILE, GET SECTORS PER TRACK,
+* SET UP TWO EMPTY FILE MAP SECTORS, AND PUT FIRST SECTOR
+* INTO FILE MAP
+         TST.B    FCBRAN(A4)         IS IT RANDOM?
+         BEQ.S    F0FERA               NO, NOT RANDOM
+         MOVE.B   FCBDRV(A4),SIRFCB+FCBDRV DRIVE NUMBER INTO SIRFCB
+         JSR      SUMNAM
+         BNE      F0RITX               EXIT ON ERROR
+         MOVE.B   SIRFCB+30,FCBSPT(A4) SECTORS PER TRACK INTO FCB
+         LEA      FCBDAT(A4),A6        POINT A6 TO DATA AREA
+         MOVE.W   #63,D6            COUNTER = 256/4-1
+ISR0E2   CLR.L    (A6)+              ERASE FOUR BYTES
+         DBRA     D6,ISR0E2
+         JSR      GRABIT               GET SECOND SECTOR
+         BNE.S    F0RITX
+         MOVE.W   FCBLTR(A4),FCBDAT(A4) GET ITS TR-SEC
+         JSR      FCS10                WRITE 1ST TO DISK
+         BNE.S    F0RITX
+         MOVE.W   FCBLTR(A4),FCBCTR(A4) SECOND IS NOW CURRENT
+         JSR      GRABIT               GET THIRD SECTOR
+         BNE.S    F0RITX
+         MOVE.W   FCBLTR(A4),FCBDAT(A4) POINT SECOND TO IT
+         JSR      FCS10                WRITE SECOND SECTOR
+         BNE.S    F0RITX
+         MOVE.W   FCBLTR(A4),FCBCTR(A4) THIRD IS NOW CURRENT
+         MOVE.W   #2,FCBSIZ(A4)     FILE SIZE = 2
+         BSR.S    PUTINM              PUT CURRENT SECTOR INTO MAP
+         BNE.S    F0RITX
+
+* THEN CONTINUE
+F0FERA   LEA      FCBDAT(A4),A6        POINT A6 TO USRFCB DATA AREA
+         MOVE.W   #63,D6            COUNTER =256/4-1
+F0FER1   CLR.L    (A6)+
+         DBRA     D6,F0FER1         ERASE DATA AREA OF FCB
+         ADD.W    #1,FCBSIZ(A4)      SIZE=SIZE+1
+         MOVE.W   FCBCRN(A4),D6
+         ADD.W    #1,D6              BUMP CURRENT RECORD NUMBER
+         MOVE.W   D6,FCBCRN(A4)
+         MOVE.W   D6,FCBDAT+2(A4)   BECOMES ALSO SECTOR COUNT
+
+F0PUT    CLR.L    D6
+         MOVE.B   FCBDPT(A4),D6     DATA POINTER
+         ADD.B    #1,FCBDPT(A4)      BUMP BYTE POINTER
+         MOVE.B   D4,FCBDAT(A4,D6)  PUT OUTPUT BYTE INTO FCB
+
+F0RITX   JSR      CPYERR
+         MOVEM.L  (A7)+,A4-A4
+         RTS
+
+* AFTER THE VERY FIRST BYTE IS PUT INTO FCB, DO THIS
+F0OLD    TST.B    FCBDPT(A4)         CHECK DATA POINTER
+         BNE.S    F0PUT              PUT BYTE IN IF NOT AT END OF SECT
+
+* FINALLY, IF DPT=0, THEN WE HAVE REACHED END OF
+* SECTOR. WE HAVE TO WRITE THIS ONE OUT AND START A NEW
+
+         JSR      GRABIT               GO GRAB A NEW SECTOR
+         BNE.S    F0RITX             EXIT ON ERROR
+         MOVE.W   FCBLTR(A4),FCBDAT(A4) ITS TR-SEC IS POINTER TO NEXT
+         JSR      FCS10                GO WRITE IT TO DISK
+         BNE.S    F0RITX
+         MOVE.B   #4,FCBDPT(A4)     NEXT BYTE WILL GO INTO POS 4
+         MOVE.W   FCBLTR(A4),FCBCTR(A4) NEXT IS NOW CURRENT TR-SEC
+
+* FINISHED IF NOT RANDOM; OTHERWISE DO SOME MORE
+         TST.B    FCBRAN(A4)         IS IT RANDOM?
+         BEQ.S    F0FERA             NO, JUST CONTINUE
+
+* EACH TIME A SECTOR IS WRITTEN TO A RANDOM FILE,
+* UPDATE THE FILE MAP TO INCLUDE IT
+
+ISR0W3   BSR.S    PUTINM             UPDATE MAP, IGNORE ERRORS
+         JMP      F0FERA               JMP F0FERA AND RETURN
+
+* PUTINM - SUBROUTINE TO PUT CURRENT SECTOR INTO MAP
+
+PUTINM   MOVE.W   FCBCTR(A4),FCBTMP(A4) SAVE CURRENT AS TEMP
+         BSR      RDFMAP               READ FILE MAP
+         BNE.L    PUTEX              IF ERROR
+
+* CHECK FIRST ENTRY
+ROWUP1   LEA      FILMAP,A6            POINT TO FILE MAP
+         TST.W    (A6)               CHECK FIRST ENTRY
+         BEQ.L    MAKNEW             EMPTY, PUT NEW IN
+
+* FIND LAST NON-EMPTY
+FINLAS   TST.B    3(A6)              CHECK FIRST BYTE
+         BNE.S    FINLA1             DEFINITELY NOT EMPTY
+         TST.B    4(A6)              CHECK SECOND BYTE
+         BEQ.S    GOTLAS             NOW ON LAST ENTRY
+FINLA1   ADD.L    #3,A6              NOT LAST, GO TO NEXT
+         BRA.S    FINLAS             ELSE CHECK NEXT
+
+* CALCULATE NEXT SECTOR AFTER LAST ENTRY
+GOTLAS   MOVE.B   0(A6),D7          GET TRACK
+         MOVE.B   1(A6),D6          AND SECTOR
+         MOVE.B   2(A6),D5          GET COUNT
+         CMP.B    #255,D5            IS IT FULL?
+         BEQ.S    GO2NEW             YES, START NEW ENTRY
+NOTFUL   ADD.B    #01,D6             BUMP SECTOR #
+         CMP.B    FCBSPT(A4),D6      PAST END OF TRACK?>
+         BLS.S    ONTRAK             NO, STILL ON TRACK
+         ADD.B    #1,D7              INCREMENT TRACK NUMBER
+         MOVE.B   FCBPHY(A4),D6     PHYSICAL DRIVE
+         BTST     #5,D6               CHECK IF HARD DISK
+         BNE.S    HARDSK             YES HARD
+         MOVE.B   #1,D6             NO, START NEW TRACK ON SEC 1
+         BRA.S    ONTRAK                AND CONTINUE
+HARDSK   CLR.B    D6                 YES, START TRACK ON SECTOR 0
+ONTRAK   SUB.B    #01,D5             BUMP COUNTER
+         BNE.S    NOTFUL
+
+* D7 NOW HAS TRACK AND D6 HAS SECTOR AFTER LAST ENTRY
+         CMP.B    FCBTMP(A4),D7      IS TRACK SAME AS CURRENT?
+         BNE.S    GO2NEW             NO, GO MAKE A NEW ENTRY
+         CMP.B    FCBTMP+1(A4),D6    SECTOR SAME AS CURRENT?
+         BNE.S    GO2NEW             NO, GO MAKE A NEW ENTRY
+         ADD.B    #1,2(A6)           YES, BUMP COUNTER TO PUT IT IN
+         BRA.S    PUTBAK
+
+* GO TO A NEW ENTRY, BUT CHECK IF FULL
+GO2NEW   ADD.L    #3,A6              GO TO NEXT ENTRY
+         CMP.L    #FMP504,A6         PAST END OF FILE MAP?
+         BCS.S    MAKNEW             IF OK
+ERR23    MOVE.B   #23,ERRTYP        ELSE IT'S ERROR 23
+         MOVE.B   #23,FCBERR(A4)    ALSO INTO FCB
+PUTEX    MOVE.W   FCBTMP(A4),FCBCTR(A4) RESTORE CURRENT TRACK
+         RTS      RTS
+
+* MAKE A NEW ENTRY WITH COUNT OF 1
+MAKNEW   MOVE.W   FCBTMP(A4),D5     GET CURRENT TRACK-SEC
+         MOVE.B   D5,1(A6)          PUT IN SECTOR
+         LSR.W    #8,D5              MOVE TRACK TO THE RIGHT
+         MOVE.B   D5,(A6)           THEN PUT TRACK INTO MAP
+         MOVE.B   #1,2(A6)          AND A LENGTH OF 1
+
+* NOW FIGURE OUT WHICH SECTOR WAS MODIFIED AND WRITE IT BACK
+PUTBAK   CMP.L    #FMP252,A6         ARE WE INTO SECOND SECTOR?
+         BCS.S    WRITE1             NO, WRITE FIRST
+
+* THE FOLLOWING CODE HAS THE DISADVANTAGE THAT IT WRITES OUT A
+* SECTOR OF THE FILE MAP FOR EACH FILE SECTOR WRITTEN. THIS
+* SHOULD ULTIMATELY BE CHANGED TO WRITE OUT FILE MAP ONLY WHEN
+* THE FILE MAP IS CLOSED, OR WHEN A NEW FILE MAP IS READ IN.
+
+* WRITE OUT SECOND SECTOR ONLY
+         LEA      FILMAP+252,A5        POINT TO SECOND SECTOR
+         MOVE.L   RANADD,A6         ADDRESS OF FCB
+         ADD.L    #FCBDAT,A6         POINT TO DATA AREA OF FCB
+         MOVE.W   HDR2,(A6)+        FIRST TWO BYTES OF HEADER
+         CLR.W    (A6)+              ALWAYS ZERO RECORD COUNT
+         MOVE.W   #62,D6            SET COUNTER TO 252/4-1
+MOVE2    MOVE.L   (A5)+,(A6)+       MOVE FOUR BYTES
+         DBRA     D6,MOVE2          REPEAT UNTIL DONE
+         MOVE.L   RANADD,A4         POINT TO FCB
+         BRA.S    WRITIT             GO WRITE IT
+
+* WRITE FIRST SECTOR ONLY
+WRITE1   LEA      HDR1,A5              POINT TO FILE MAP
+         MOVE.L   RANADD,A6         ADDRESS OF FCB
+         ADD.L    #FCBDAT,A6         POINT TO DATA AREA
+         MOVE.W   #63,D6            COUNTER = 256/4-1
+MOVE1    MOVE.L   (A5)+,(A6)+       MOVE FOUR BYTES
+         DBRA     D6,MOVE1          REPEAT UNTIL DONE
+         MOVE.L   RANADD,A4         POINT TO FCB
+         MOVE.W   FCBFTR(A4),FCBCTR(A4) FIRST IS CURRENT TR-SEC
+WRITIT   JSR      FCS10                WRITE IT BACK
+         BNE      PUTEX
+         MOVE.W   FCBTMP(A4),FCBCTR(A4) RESTORE CURRENT TR-SEC
+         CLR.L    D5                 CLEAR ERROR
+         RTS
+
+* RDFMAP SUBROUTINE - READS FILE MAP
+* INTO MEMORY IF NOT ALREADY THERE. ON ENTRY AND
+* EXIT, A4-> TO FCB
+
+RDFMAP   MOVE.B   FCBDRV(A4),D5     DRIVE NUMBER
+         MOVE.W   FCBFTR(A4),A6     FIRST TR-SEC
+         CMP.L    RANADD,A4          CHECK FCB ADDRESS
+         BNE.S    RFMNO              NOT THERE
+         CMP.B    FMDRV,D5           CHECK DRIVE NUMBER
+         BNE.S    RFMNO              NOT THERE
+         CMP.W    FMTRSE,A6          CHECK TRACK-SECTOR
+         BEQ.S    RFMEX              YES, IT'S THERE!
+
+* IF NOT YET IN MEMORY, READ IT
+
+RFMNO    MOVE.L   A4,RANADD         STORE DATA - FCB ADDRESS
+         MOVE.B   D5,FMDRV          DRIVE NUMBER
+         MOVE.W   A6,FMTRSE         TRACK AND SECTOR
+         MOVE.W   A6,FCBCTR(A4)     1ST SECTOR OF MAP
+         JSR      FCS9                 READ IT
+         BEQ.S    RFMNOK             IF OK
+RFMEX    RTS      IF NOT OK
+
+RFMNOK   LEA      HDR1,A6              POINT TO FILE MAP
+         MOVE.W   #63,D6            COUNTER = 256/4-1
+         LEA      FCBDAT(A4),A4        POINT TO DATA
+RDFML1   MOVE.L   (A4)+,(A6)+       MOVE A BYTE
+         DBRA     D6,RDFML1
+         MOVE.L   RANADD,A4         BACK TO FCB
+         MOVE.W   FCBDAT(A4),FCBCTR(A4) SECOND IS NOW CURRENT
+         JSR      FCS9                 READ SECOND SECTOR
+         BNE.S    RFMEX              IF ERROR
+         LEA      FCBDAT(A4),A4        POINT TO DATA
+         MOVE.W   (A4)+,HDR2        FIRST TWO BYTES OF HEADER
+         ADD.L    #2,A4              SKIP NEXT TWO BYTES
+         MOVE.W   #62,D6            COUNTER = 252/4-1
+RDFML2   MOVE.L   (A4)+,(A6)+       MOVE BYTE INTO MAP
+         DBRA     D6,RDFML2         REPEAT UNTIL DONE
+         MOVE.L   RANADD,A4         POINT BACK TO FCB
+         CLR.L    D5                 CLEAR ERROR CONDITION
+         RTS      AND THEN EXIT
+
+* FWRITE TO A DEVICE
+
+FCS0DW   SUB.B    #$10,D5            CVT 10-17 TO 0-7
+         CMP.B    #7,D5              CHECK FOR VALID DEVICE
+         BCC.L    FCS0W              DO AS FOR FILE IF NOT GOOD
+         AND.L    #$FF,D5            CLEAR REST OF REGISTER
+         MOVE.B   D5,DEVNOW         CURRENT DEVICE NUMBER
+         MULU     #80,D5              TIMES 80
+         LEA      DEVTAB(PC),A4
+         ADD.L    D5,A4              POINTER TO CURRENT ENTRY
+         MOVE.L   A4,DEVADD         SAVE IT
+         JSR      PUTCFF               OUTPUT VIA PUTCHR
+         BRA.L    F0RITX             THEN EXIT WITH ZERO
+
+
+         EVEN
+
+*         LIB      1.TXFMS2
+* FCS1 - FCS FUNCTION 1. OPEN FILE FOR READ
+*
+* CALLED BY: USER
+* INPUT: A4 POINTS TO FCB
+* OUTPUT:
+* REGISTERS USED:
+
+* IF DRIVE NUMBER = $FF, AND IT'S A REQUEST TO
+* OPEN A FILE, SEARCH FOR CORRECT DRIVE NUMBER
+
+* MOVEM.L MUST MATCH THAT OF FCS5
+
+FCS1     MOVEM.L  A4-A4,-(A7)
+         TST.B    FCBDRV(A4)         CHECK DRIVE NUMBER
+         BPL.S    FCS1DE             IF DRIVE EXISTS
+FCS1A    JSR      FCS20                FIND NEXT DRIVE
+         BNE.S    FCS1BD             NG IF NO DRIVE FOUND
+         JSR      FCS1                 NOW REPEAT FUNCTION ON THIS DRIVE
+         BEQ.S    FCS1BD             WAS COMPLETED OK, SO EXIT
+         MOVE.B   FCBDRV(A4),D5     CHECK DRIVE NUMBER
+         CMP.B    MAXDRV,D5          IS IT MAXIMUM DRIVE?
+         BNE.S    FCS1A              NO, SO TRY ANOTHER DRIVE
+* EITHER FUNCTION WAS COMPLETED ON THIS DRIVE, OR
+* GOT AN ERROR AND THIS IS THE LAST DRIVE, OR
+* ELSE NO DRIVE WAS FOUND; EITHER WAY, EXIT
+FCS1BD   MOVEM.L  (A7)+,A4-A4
+         RTS      AND EXIT
+
+* HERE IS THE MAIN CODE FOR FCS1
+
+FCS1DE   JSR      FINDEV               GO CHECK FOR A DEVICE NAME
+         BEQ.L    FCS1EX             EXIT IF A DEVICE
+         JSR      CHKUSE               CHECK IF FCB IS IN USE
+         BNE.L    FCS1EX             EXIT ON ERROR
+         CLR.W    FCBCRN(A4)         CLEAR CURRENT RECORD NUMBER
+         LEA      15(A4),A6            A6-> TO BYTE 15
+         CLR.B    (A6)+              CLEAR FCB BYTE 15 (PAST EXT)
+         MOVE.W   #83,D6            READY TO ERASE REST OF FCB
+FCS1EE   CLR.L    (A6)+              ERASE 4 BYTES AT A TIME
+         DBRA     D6,FCS1EE         DEC COUNTER
+         LEA      FCBNMB-1(A4),A6      POINT TO TEMP NAME BUFFER
+         LEA      FCBNAM-1(A4),A5      AND TO NAME
+         MOVE.B   (A5)+,(A6)+       MOVE DRIVE NUMBER
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       MOVE NAME FOR COMPAT
+         MOVE.L   (A5)+,(A6)+       MOVE EXTENSION AND ATTRIBUTE
+         JSR      FINAME               FIND NAME IN DIRECTORY
+*         BEQ.S FOUNAM             IF IT WAS FOUND
+*         CMP.B #4,ERRTYP          ERROR - NOT FOUND?
+*         BNE.S FCS1EX             NO, JUST EXIT
+*         CLR.B FCBNAM(A4)         FOR COMPATIBILITY
+*         BRA.S FCS1EX             THEN EXIT
+         BNE.L    FCS1EX             IF ERROR
+
+FOUNAM   LEA      FCBNAM(A4),A6        A6-> USER'S NAME
+         LEA      DIRFCB+FCBNAM,A5     A5-> DIRECTORY ENTRY
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       MOVE 27 BYTES FROM DIR TO USER'S
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       AND AN EXTRA BYTE!
+         BTST.B   #5,FCBATT(A4)     READ PROTECT?
+         BEQ.S    FCS1B                NO, SO CONTINUE
+         MOVE.B   #12,ERRTYP        YES, SO IT'S ERROR 12
+         BRA.S    FCS1EX               AND EXIT
+FCS1B    MOVE.W   FCBFTR(A4),FCBDAT(A4) FIRST TRACK AND SECTOR
+         CLR.B    FCBDPT(A4)         DATA POINTER AT BEGINNING
+         CLR.B    FCBSCF(A4)         ASSUME SPACE COMPR FOR NOW
+         CLR.B    ERRTYP             NO ERROR
+         MOVE.B   #1,D5             SET FOR READING (DONE IN GETUPD)
+         BSR.S    GETUPD               GET DIR INFO & UPDATE FILE LIST PTRS
+
+* SKIP FIRST TWO SECTORS IF RANDOM FILE
+
+         TST.B    FCBRAN(A4)         IS IT RANDOM?
+         BEQ.S    FCS1EX             NO, SO JUST EXIT
+         SUB.B    #1,FCBSCF(A4)      YES, KILL SPACE COMPRESSION
+         MOVEM.L  D0-D0,-(A7)
+         MOVE.W   #503,D0           504 BYTES IN TWO SECTORS
+F1LOOP   JSR      FREAD                GO READ A BYTE
+         BNE.S    F1LOEX             EXIT ON ERROR
+         DBRA     D0,F1LOOP         DECREMENT COUNTER AND REPEAT
+         MOVE.B   FCBDRV(A4),SIRFCB+FCBDRV DR NUM INTO SIRFCB
+         JSR      SUMNAM               GET SECTORS PER TRACK
+         BNE.S    F1LOEX             EXIT ON ERROR
+         MOVE.B   SIRFCB+30,FCBSPT(A4) STORE SECTORS PER TRACK
+F1LOEX   MOVEM.L  (A7)+,D0-D0
+
+FCS1EX   JSR      CPYERR               TEST AND COPY ERRTYP INTO 1,X
+         MOVEM.L  (A7)+,A4-A4      PULL
+         RTS
+
+* SET R/W FLAG WITH 1 (READ) OR 2 (WRITE), CLEAR FUNCTION CODE,
+* UPDATE FCB FILE LIST POINTERS AND GET DIRECTORY INFO INTO FCB
+GETUPD   MOVE.B   D5,FCBRW(A4)      SET R/W STATUS FLAG
+         CLR.B    FCBUPD(A4)         MARK NOT YET UPDATED
+         MOVE.L   FBAPTR,FCBLST(A4) MOVE PTR TO 1ST OPEN FCB (IF ANY)
+         LEA      FCBLST(A4),A6        POINT TO THIS FCB'S POINTER
+         MOVE.L   A6,FBAPTR         GIVE IT TO STAR-DOS
+         MOVE.W   DIRFCB+FCBDIT,FCBDIT(A4) DIRECTORY TRACK-SECTOR
+         MOVE.B   DIRFCB+FCBDIB,FCBDIB(A4) DIRECTORY BYTE POINTER
+         RTS      RTS
+
+* FCS2 - FCS FUNCTION 2. OPEN A FILE FOR WRITE
+*
+* CALLED BY:
+* INPUT: A4 POINTS TO FCB
+* OUTPUT:
+* REGISTERS USED: A4 PRESERVED
+
+* IF DRIVE NUMBER = $FF, AND IT'S A REQUEST TO
+* OPEN A FILE, SEARCH FOR CORRECT DRIVE NUMBER
+
+FCS2     MOVEM.L  A3/A4,-(A7)
+         TST.B    FCBDRV(A4)         CHECK DRIVE NUMBER
+         BPL.S    FCS2DE             IF DRIVE EXISTS
+FCS2A    JSR      FCS20                FIND NEXT DRIVE
+         BNE.S    FCS2BD             NG IF NO DRIVE FOUND
+         JSR      FCS2DE               NOW REPEAT FUNCTION ON THIS DRIVE
+         BEQ.S    FCS2BD             WAS COMPLETED OK, SO EXIT
+         MOVE.B   FCBDRV(A4),D5     CHECK DRIVE NUMBER
+         CMP.B    MAXDRV,D5          IS IT MAXIMUM DRIVE?
+         BNE.S    FCS2A              NO, SO TRY ANOTHER DRIVE
+* EITHER FUNCTION WAS COMPLETED ON THIS DRIVE, OR
+* GOT AN ERROR AND THIS IS THE LAST DRIVE, OR
+* ELSE NO DRIVE WAS FOUND; EITHER WAY, EXIT
+FCS2BD   MOVEM.L  (A7)+,A3/A4
+         RTS      AND EXIT
+
+* HERE IS THE MAIN CODE FOR FCS2
+
+FCS2DE   JSR      FINDEV               GO CHECK FOR A DEVICE NAME
+         BEQ.S    FCS2EX             EXIT IF A DEVICE
+         JSR      CHKUSE               SEE IF FCB IS IN USE
+         BNE.S    FCS2EX               EXIT IF YES
+         MOVE.B   FCBDRV(A4),D5     GET DRIVE NUMBER
+         MOVE.B   D5,SIRFCB+FCBDRV  PUT INTO SIR FCB
+         CMP.B    MAXDRV,D5          CHECK FOR MAXIMUM DRIVE NUMBER
+         BLS.S    FCS2DO             <=9 IS OK
+         MOVE.B   #15,ERRTYP        DRIVE NUMBER ERROR
+         BRA.S    FCS2EX
+
+FCS2DO   JSR      FINAME               FIND NAME IN DIRECTORY
+         BNE.S    FCS2NT               OK IF THERE'S AN ERROR
+         MOVE.B   #3,ERRTYP         ELSE FILE EXISTS, ERROR 3
+
+FCS2EX   JSR      CPYERR
+         MOVEM.L  (A7)+,A3/A4         PULL
+         RTS
+
+* OK TO OPEN A FILE NOT YET ON DISK, BUT CHECK ERROR
+FCS2NT   CMP.B    #4,ERRTYP          FILE NOT THERE?
+         BNE.S    FCS2EX             NO, MUST BE SOMETHING ELSE BAD
+
+         LEA      15(A4),A6            A6-> TO BYTE 15
+         CLR.B    (A6)+              CLEAR FCB BYTE 15 (PAST EXT)
+         MOVE.W   #83,D6            READY TO ERASE REST OF FCB
+FCS2EE   CLR.L    (A6)+              ERASE 4 BYTES AT A TIME
+         DBRA     D6,FCS2EE         DEC COUNTER
+         CLR.B    ERRTYP
+         CLR.B    FCBERR(A4)         NO ERROR YET
+
+* NOW LOOK AT SIR, MAKE SURE IT'S THE SAME DISK AND
+* THERE'S ROOM
+
+         JSR      SUMNAM               READ SIR INTO SIRFCB AND CHKSUM IT
+         BNE.S    FCS2EX             ON ERROR
+         MOVE.B   FCBDRV(A4),D6     GET DRIVE NUMBER
+         JSR      DTPOIN               POINT A5 TO DRIVE'S ENTRY IN DRTABL
+         MOVE.L   A5,A3             SAVE ENTRY ADDR IN A3
+         MOVE.W   (A3),D5           CHECK IF TABLE ENTRY IS EMPTY
+         BEQ.S    F2EMTY               EMPTY
+
+* TABLE ENTRY NOT EMPTY, SO CHECK CHECKSUM
+         CMP.W    CHKSUM,D5          CHKSUM SAME?
+         BEQ.S    F2DKOK             YES IT'S SAME DISK, SO CONTINUE
+         JMP      STOP29               QUIT IMMEDIATELY ON DISK SWITCHED
+
+* TABLE ENTRY EMPTY, SO PUT SIR DATA INTO IT
+F2EMTY   JSR      GETSIR               COPY SIR DATA INTO DRTABL
+
+* NOW CHECK IF ENOUGH ROOM IS ON DISK
+F2DKOK   TST.W    6(A3)              CHECK ROOM LEFT ON DISK
+         BNE.S    F2ROOM             YES, IT'S OK
+         MOVE.B   #7,ERRTYP         NO, REPORT ERROR 7
+         BRA.S    FCS2EX
+
+* NEXT FIND AN EMPTY SPOT IN THE DIRECTORY
+F2ROOM   MOVE.L   #DIRFCB,A4
+         JSR      FCS6                 OPEN IT
+F2FIND   JSR      FCS7                 GET NEXT RECORD
+         BNE.S    F2DIRE             DIRECTORY ERROR - GO CHECK IT
+         MOVE.B   FCBNAM(A4),D5     LOOK AT FIRST CHARACTER
+         BEQ.L    F2FOUN             FOUND AN EMPTY SPOT AT END
+         ADD.B    #01,D5             CHANGE FF TO 0?
+         BEQ.L    F2FOUN             FOUND A DELETED ENTRY
+         BRA.S    F2FIND             ELSE GO LOOK FOR MORE
+
+* AT DIRECTORY ERROR, SEE IF EOF OR SOMETHING ELSE
+F2DIRE   CMP.B    #8,ERRTYP          DIRECTORY EOF?
+         BNE.L    FCS2EX             SOMETHING ELSE, SO IT'S AN ERROR
+
+* IT WAS DIRECTORY EOF, SO GRAB ANOTHER SECTOR FOR IT
+         CLR.B    FCBERR(A4)         CLEAR THE ERROR
+         CLR.B    ERRTYP
+         MOVE.W   2(A3),D6          FIND NEXT FREE T-S
+         BNE.S    HASROO             THERE'S ROOM
+         MOVE.B   #6,ERRTYP         NO, DIRECTORY FULL ERROR
+         BRA      FCS2EX
+
+HASROO   MOVE.W   D6,FCBDAT(A4)     PUT IN POINTER ON CURRENT DIR SECTOR
+         JSR      FCS8                 WRITE BACK WITH NEW POINTER
+         BNE.S    F2ERR5               SIGNAL DIRECTORY ERROR
+         JSR      FCS7                 NOW READ NEXT SECTOR
+         BNE.S    F2ERR5               SIGNAL DIRECTORY ERROR
+         MOVE.W   FCBDAT(A4),2(A3)  SAVE NEXT FREE T-S PTR IN DR TABL
+         SUB.W    #1,6(A3)           SUBTRACT 1 FROM FREE SPACE
+         LEA      FCBDAT(A4),A5        POINT TO FCB DATA AREA
+         MOVE.W   #63,D6            SET COUNTER = 256/4-1
+CLRDIR   CLR.L    (A5)+              CLEAR NEW DIRECTORY SECTOR
+         DBRA     D6,CLRDIR         ERASE 256 BYTES OF DIRECTORY DATA
+         JSR      FCS8                 GO WRITE IT TO DISK
+         BNE.S    F2ERR5               SIGNAL DIRECTORY ERROR
+         JSR      UPDSIR               MOVE DATA FROM TABLE BACK TO SIR
+         BNE.L    FCS2EX
+         BRA      F2DKOK               SEE IF ENOUGH ROOM LEFT ON DISK
+
+* ON DIRECTORY ERROR, SIGNAL IT, BUT CHECK ERROR
+F2ERR5   CMP.B    #11,ERRTYP         WRITE PROTECTED?
+         BEQ.S    WPISOK             YES, IT'S OK
+         MOVE.B   #5,D5             DIRECTORY ERROR IF ANYTHING ELSE
+         JSR      RPTER0               REPORT IT
+WPISOK   JMP      FCS2EX               AND THEN REPORT MAIN ERROR
+
+* FOUND ROOM IN DIRECTORY, SET UP USER'S FCB FOR IT
+F2FOUN   MOVE.L   CURFCB,A4         POINT TO USER FCB
+         LEA      15(A4),A5            POINT PAST NAME
+         CLR.B    (A5)+              CLEAR FIRST BYTE
+         MOVE.W   #20,D6            COUNT 68/4 BYTES
+CLRFCB   CLR.L    (A5)+              CLEAR NEXT 4 BYTES
+         DBRA     D6,CLRFCB           ERASING FROM NAME TO 99,X
+         MOVE.B   SPACOM,FCBSCF(A4) DEFAULT SPACE COMP
+         MOVE.W   MONTH,FCBMON(A4)  TRANSFER TODAY'S DATE
+         MOVE.B   YEAR,FCBYR(A4)    YEAR
+         JSR      SEQUEN               GET SEQUENCE NUMBER
+         JSR      INTIME               OR REPLACE BY TIME
+         MOVE.B   D5,FCBTIM(A4)
+         MOVE.B   #4,FCBDPT(A4)     DATA POINTER AT FOURTH BYTE
+         MOVE.B   #2,D5             SET FOR WRITING (DONE IN GETUPD)
+         JSR      GETUPD               GET DIR INFO & UPDATE FILE LIST PTRS
+* NOW MOVE INTO DIRECTORY
+         LEA      FCBNAM(A4),A5        POINT TO NAME
+         MOVE.L   #DIRFCB+FCBNAM,A6 ALSO IN DIR FCB
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       MOVE 27 BYTES INTO DIRECTORY
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       AND AN EXTRA ONE!
+         MOVE.L   #DIRFCB,A4
+         JSR      FCS11                WRITE IT TO DISK
+         BNE.L    F2ERR5             IF DIRECTORY ERROR
+* THEN FINISH UP
+         CLR.L    D5                 RESET Z ERROR
+         MOVEM.L  (A7)+,A3/A4
+         RTS
+
+* THE FOLLOWING ROUTINES ASSIGN A SEQUENCE NUMBER
+* TO WRITTEN FILES WHEN NO CLOCK CHIP IS INSTALLED
+
+SEQUEN   CMP.W    #$1234,SEQFLG      INITIAL BOOTUP?
+         BEQ.S    SEQNOI             NO, NOT INITIAL
+         MOVE.B   #1,SEQNO          YES, INITIALIZE SEQUENCE NO
+         MOVE.W   #$1234,SEQFLG     AND ALSO BOOTUP FLAG
+SEQNOI   MOVE.B   SEQNO,D5          LOAD SEQUENCE NUMBER
+         ADD.B    #1,SEQNO           THEN INCREMENT TO NEXT
+         RTS
+
+* FCS3 - OPEN A FILE FOR UPDATE
+* RETURNS READY TO READ
+*
+* CALLED BY: USER
+* INPUT: A4 POINTS TO FCB
+* OUTPUT:
+* REGISTERS USED: D5 (A4 PRESERVED)
+
+
+FCS3     JSR      FCS1                 GO TO OPEN FILE FOR READ
+         BEQ.S    OPUPOK               IF NO ERROR
+RAN3ER   CLR.L    D5
+RAN3EX   RTS
+
+OPUPOK   TST.B    FCBRAN(A4)         IS IT RANDOM?
+         BNE.S    FINRA3             YES, FINISH
+         MOVE.B   #19,ERRTYP        NO, ERROR 19
+         MOVE.B   #19,FCBERR(A4)
+         RTS
+
+* IF NO ERROR, CONTINUE
+FINRA3   MOVE.B   #3,FCBRW(A4)      MARKY OPEN FOR UPD BUT NOT YET
+         JSR      FREAD                GO READ ONE BYTE FROM FILE
+         BNE.S    RAN3ER             EXIT ON ERROR
+         SUB.B    #1,FCBDPT(A4)      THEN UNDO THE BYTE JUST READ
+         CLR.L    D5                 CLEAR ERROR FLAG
+         RTS
+
+* FCS4 - FCS FUNCTION 4. CLOSE FILE
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS4     MOVEM.L  A4-A4,-(A7)
+         MOVE.B   FCBDRV(A4),D6     CHECK DRIVE NUMBER
+         CLR.B    FCBERR(A4)         CLEAR ERROR IN CASE
+         SUB.B    #$10,D6            CVT $10-$17 TO 0-7
+         CMP.B    #7,D6              CHECK IF >7
+         BLS.S    F4EXIT             EXIT IF DEVICE, NOT FILE
+         MOVE.B   FCBRW(A4),D6      R/W STATUS BYTE
+         SUB.B    #01,D6
+         BEQ.S    F4LST              READ IF IT WAS A 1
+         SUB.B    #01,D6
+         BEQ      FCS4W                WRITE IF IT WAS A 2
+         SUB.B    #01,D6
+         LSL.B    #1,D6
+         BNE      ERR22                FILE CLOSING ERROR IF NOT 3 OR 83
+
+* REMOVE THIS FILE FROM FCB LIST POINTERS
+F4LST    MOVE.L   CURFCB,A4           A4-> USER'S FCB
+         MOVE.L   #FBAPTR,A6          POINT A6 TO DOS'S FCB POINTER
+         LEA      FCBLST(A4),A4          POINT A4 TO THIS FCB'S POINTER
+F4LST0   MOVE.L   (A6),D7             PICK UP PREVIOUS POINTER
+         BEQ      ERR22                  ERROR 22 IF 0 - FILE NOT OPEN
+         CMP.L    A4,D7                COMPARE PREV PTR TO THIS FCB
+         BEQ.S    F4LST1               FOUND IT, GO CHANGE
+         MOVE.L   D7,A6               SAVE AS ADDRESS OF NEXT POINTER
+         BRA.S    F4LST0               AND REPEAT
+
+* WHEN PREVIOUS POINTER POINTS TO THIS FCB, THEN
+* MOVE POINTER FROM THIS FCB INTO PREVIOUS
+F4LST1   MOVE.L   (A4),(A6)           THIS FCB'S POINTER IS PREV
+         CLR.L    (A4)                 ERASE POINTER IN THIS FCB
+         MOVE.L   (A7),A4             POINT X TO FCB
+         TST.B    FCBRAN(A4)           IS IT RANDOM?
+         BNE.S    RAN4B                YES, GO DO RANDOM STUFF
+
+F4EXIT   CLR.B    FCBRW(A4)            CLEAR R/W FLAG
+         JSR      CPYERR                 TEST AND COPY ERRTYP INTO 1,X
+         MOVEM.L  (A7)+,A4-A4        PULL
+         RTS
+
+* WHEN DOING RANDOM FILE, WRITE CURRENT SECTOR OUT IF
+* MODIFIED, AND DELETE FILE MAP FROM MEMORY
+
+RAN4B    CMP.L    RANADD,A4            CHECK IF THE SAME
+         BNE.S    RAN4C                DIFFERENT
+         MOVE.L   #-1,RANADD        ERASE FCB ADDRESS MEMORY
+         CLR.B    FMTRSE             AND TRACK MEMORY
+RAN4C    BSR.S    WRUPDA               WRITE OUT SECTOR IF UPDATED
+         BNE.S    F4EXIT               IF ERROR
+
+         TST.B    FCBUPD(A4)         HAS FILE BEEN UPDATED?
+         BEQ.S    F4EXIT             NO, SO QUIT
+
+* IF FILE HAS BEEN UPDATED, THEN ALSO CHANGE DATE
+
+         JSR      FCS1                 GO OPEN FILE FOR READ
+         BNE.S    F4EXIT             QUIT ON ERROR
+         JSR      FCS4                 GO CLOSE FILE AGAIN
+         BNE.S    F4EXIT             QUIT ON ERROR
+         MOVE.W   FCBDIT(A4),FCBCTR(A4) TR-SEC OF DIRECTORY ENTRY
+         JSR      FCS9                 GO READ DIRECTORY SECTOR
+         BNE.S    F4EXIT             ON ERROR
+         CLR.L    D6
+         MOVE.B   FCBDIB(A4),D6     BYTE OF DIRECTORY ENTRY
+         LEA      FCBDAT(A4,D6),A6     A6-> ENTRY IN DIR
+         MOVE.B   MONTH,FCBMON-7(A6) MOVE MONTH
+         MOVE.B   DAY,FCBDAY-7(A6)  DAY
+         MOVE.B   YEAR,FCBYR-7(A6)  YEAR
+         JSR      SEQUEN               GET SEQUENCE NUMBER
+         JSR      INTIME               OR REPLACE BY TIME
+         MOVE.B   D5,FCBTIM-7(A6)
+         JSR      FCS10                WRITE IT BACK TO DISK
+         BRA      F4EXIT               AND QUIT
+
+* IF CURRENT SECTOR HAS BEEN UPDATED, WRITE IT OUT
+WRUPDA   TST.B    FCBRW(A4)          UPDATED SECTOR?
+         BPL.S    WRUPEX             NO, EXIT
+         MOVE.B   FCBRW(A4),FCBUPD(A4) SET FILE UPDATE FLAG
+         AND.B    #$0F,FCBRW(A4)     CHANGE 83 TO 03
+         JSR      FCS10                WRITE IT BACK TO DISK
+         RTS      AND QUIT
+WRUPEX   CLR.B    D5                 CLEAR ERROR FLAG
+         RTS
+
+* ERROR 22 - ERROR IN CLOSING FILE
+
+ERR22    MOVE.L   (A7),A4           POINT X BACK TO FCB
+         MOVE.B   #22,ERRTYP        ERROR 22
+         BRA      F4EXIT               AND EXIT FUNCTION 4
+
+* CLOSING A WRITE FILE IS CONSIDERABLY MORE DIFFICULT. FIRST,
+* CHECK WHETHER FILE IS REALLY OPEN
+
+FCS4W    MOVE.L   #FBAPTR,A6          POINT A6 TO DOS'S FCB POINTER
+         LEA      FCBLST(A4),A4          POINT A4 TO THIS FCB'S POINTER
+FCS4LS   MOVE.L   (A6),D7             PICK UP PREVIOUS POINTER
+         BEQ      ERR22                  ERROR 22 IF 0 - FILE NOT OPEN
+         CMP.L    A4,D7                COMPARE PREV PTR TO THIS FCB
+         BEQ.S    FCS4WC               FOUND IT, SO IT'S OK TO CLOSE
+         MOVE.L   D7,A6               SAVE AS ADDRESS OF NEXT POINTER
+         BRA.S    FCS4LS               AND REPEAT
+
+* NOW CONTINUE IF IT WAS IN LIST
+FCS4WC   MOVE.L   (A7),A4           BACK TO THIS FCB
+         MOVE.B   FCBDRV(A4),SIRFCB+FCBDRV DRIVE NUMBER INTO SIRFCB
+         MOVE.B   FCBSCF(A4),D6     CHECK FOR UNFINISHED SPACES
+         BEQ.S    FCS4W1             NONE OUTSTANDING, GO ON
+         BMI.S    FCS4W1             NO COMPRESSION BEING DONE
+         MOVE.B   #$09,D5           ELSE SEND OUTSTANDING SPACES
+         JSR      FWRITE
+         BNE      F4EXIT
+         MOVE.B   FCBSCF(A4),D5     NUMBER OF SPACES
+         JSR      FWRITE               OUTPUT IT
+         BNE      F4EXIT
+         CLR.L    D5                 AND A FINAL 00
+         JSR      FWRITE
+         BNE      F4EXIT               ON ERROR
+FCS4W1   TST.W    FCBSIZ(A4)         CHECK FILESIZE
+         BNE.S    F4NOT0               IF >0 THEN STILL HARD
+         JSR      FCS12                SIZE=0 EASY - DELETE DIR ENTRY
+         BNE      F4EXIT
+         BRA.S    F4WDON             AND FINISH UP
+
+* IF SIZE>0, THEN DIRECTORY ENTRY STAYS. WE
+* ALWAYS HAVE TO WRITE OUT THE LAST SECTOR.
+F4NOT0   CLR.W    FCBDAT(A4)         SIGNAL END OF CHAIN
+         JSR      FCS10                WRITE SECTOR OUT
+         BNE      F4EXIT
+* NOW UPDATE DIRECTORY
+         MOVE.W   FCBDIT(A4),FCBCTR(A4) TR-SEC OF DIRECTORY ENTRY
+         JSR      FCS9                 GO READ DIRECTORY SECTOR
+         BNE.S    F4ERR5             REPORT DIRECTORY ERROR
+         CLR.L    D6
+         MOVE.B   FCBDIB(A4),D6     POINT TO DIRECTORY ENTRY
+         LEA.L    FCBATT(A4),A5      POINT TO ORIGINAL DATA
+         LEA.L    FCBDAT+11(A4,D6),A6 POINT TO WHERE TO PUT IT
+         MOVE.B   (A5)+,(A6)+       ATTRIBUTE BYTE
+         MOVE.B   (A5)+,(A6)+       PROTECTION BYTE
+         LEA      1(A5),A5             SKIP A BYTE
+         MOVE.B   (A5)+,(A6)+       FTR
+         MOVE.B   (A5)+,(A6)+       FSE
+         LEA      2(A5),A5             SKIP 2 BYTES
+         MOVE.B   (A5)+,(A6)+       LTR
+         MOVE.B   (A5)+,(A6)+       LSE
+         MOVE.B   (A5)+,(A6)+       SIZE
+         MOVE.B   (A5)+,(A6)+       SIZE
+         MOVE.B   (A5)+,(A6)+       RANDOM FLAG
+         MOVE.B   (A5)+,(A6)+       TIME
+         MOVE.B   (A5)+,(A6)+       MONTH
+         MOVE.B   (A5)+,(A6)+       DAY
+         MOVE.B   (A5)+,(A6)+       YEAR
+         JSR      FCS10                WRITE IT BACK TO DISK
+         BNE.S    F4ERR5             REPORT DIRECTORY ERROR
+
+* NOW UPDATE SIR AND DELETE POINTER IF NO OTHER
+* FILES ARE OPEN FOR WRITING ON THIS DRIVE
+F4WDON   BSR.S    UPDSIR             GO UPDATE SIR
+         BNE      F4EXIT
+         MOVE.L   CURFCB,A4
+         MOVE.W   #$0200,D5         1ST BYTE = 02
+         MOVE.B   FCBDRV(A4),D5     SECOND =  DRIVE NUMBER
+         NOT.B    FCBDRV(A4)         KILL IT IN THIS FCB
+         MOVE.L   FBAPTR,A6         ADDRESS OF FIRST FCB+FCBLST
+* LOOP TO SEARCH ALL OPEN FCB'S FOR DRIVE NUMBERS
+SRCHLO   CMP.W    FCBRW-FCBLST(A6),D5 CHECK EACH FCB'S RW CODE & DR NUM
+         BEQ.S    RESTDN             FOUND ONE, SO DON'T KILL DRTABL ENTRY
+         MOVE.L   (A6),A6           GET NEXT POINTER
+         MOVE.L   A6,D7             MOVE INTO D7 FOR TEST
+         BNE.S    SRCHLO             REPEAT IF POINTER EXISTS
+* ALL FCB'S CHECKED AND NONE MATCHED THIS DRIVE
+* SO DELETE THE ENTRY FROM TABLE
+         MOVE.L   DRTPTR,A6         POINT TO DRIVE ENTRY
+         CLR.W    (A6)               STORE ZERO INTO DRIVE'S CHECKSUM
+
+RESTDN   NOT.B    FCBDRV(A4)         RESTORE DRIVE NUMBER
+         JMP      F4LST                GO REMOVE FILE LIST POINTER
+
+* ON DIRECTORY ERROR, REPORT IT AND MAIN ALSO
+F4ERR5   MOVE.B   #5,D5             DIRECTORY ERROR
+         JSR      RPTER0               REPORT IT
+         MOVE.B   #5,ERRTYP
+         JMP      F4EXIT               AND THEN MAIN EXIT
+
+* UPDATE SIR FROM DRIVE DATA TABLE
+*    ASSUMES DRTABL ENTRY ALREADY EXISTS FOR SPECIFIED
+*    DRIVE, AND WRITES IT TO SIR (UNLESS CHECKSUM IN
+*    TABLE DOESN'T MATCH DISK OR THERE IS AN ERROR IN
+*    READING OR WRITING SIR, IN WHICH CASE IT ABORTS
+*    ON ENTRY - A4 POINTS TO FCB WITH DRIVE NUMBER
+*    ON EXIT  - A4 POINTS TO SIRFCB
+*
+UPDSIR   JSR      SUMNAM               GO READ SIR AND CHECKSUM NAME
+         BNE.S    UPDEXI             QUIT ON ERROR
+         MOVE.B   FCBDRV(A4),D6     GET DRIVE NUMBER
+         BSR.S    DTPOIN             POINT A5 TO DRIVE'S ENTRY IN DRTABL
+         MOVE.W   (A5),D5
+         CMP.W    CHKSUM,D5          COMPARE CHECKSUM AGAINST DISK
+         BNE.S    STOP29             OOOPS - THE GUY CHANGED DISKS!
+         MOVE.L   #SIRFCB+FCBDAT+29,A6 POINT TO TRACK IN SIR FCB
+         LEA.L    2(A5),A5           POINT TO BYTE 2 OF TABLE ENTRY
+         MOVE.B   (A5)+,(A6)+       FIRST TRACK
+         MOVE.B   (A5)+,(A6)+       FIRST SEC
+         MOVE.B   (A5)+,(A6)+       LAST TR
+         MOVE.B   (A5)+,(A6)+       LAST SEC
+         MOVE.B   (A5)+,(A6)+       NUMBER OF FREE
+         MOVE.B   (A5)+,(A6)+       DITTO
+         MOVE.L   #SIRFCB,A4        SIRFCB
+         JSR      FCS10                WRITE SIR BACK
+         BEQ.S    UPDEXI             IF OK
+         MOVE.B   #5,ERRTYP         ELSE IT'S ERROR 5
+UPDEXI   RTS
+STOP29   MOVE.B   #29,D5            ERROR 29 IF DISK CHANGED
+         JSR      RPTER0
+         JMP      WARMS
+*
+* DTPOIN - POINT X TO DRIVE'S ENTRY IN DRIVE TABLE
+*     ON ENTRY - DRIVE NUMBER IN D6
+*     ON EXIT  - D6, A5, AND DRTPTR POINT TO DRIVE'S ENTRY
+*
+DTPOIN   AND.W    #$00FF,D6          KEEP ONLY LSB OF D6
+         MULU     #10,D6              MULT DR NUMB BY 10
+         ADD.L    #DRTABL,D6         ADD PTR TO DRIVE DATA TABLE
+         MOVE.L   D6,A5             POINT TO CURRENT DRIVE'S ENTRY
+         MOVE.L   D6,DRTPTR         AND SAVE AS DRIVE TABLE POINTER
+         RTS
+*
+* GETSIR - COPY SIR DATA INTO DRIVE DATA TABLE
+*   ON ENTRY - A5 POINTS TO DRIVE'S ENTRY IN DRTABL
+*   ON EXIT  - DITTO FOR A5
+*
+GETSIR   MOVE.W   CHKSUM,(A5)         CHECKSUM INTO TABLE
+         MOVE.W   SIRFCB+FCBFTR,2(A5) FIRST TRACK & SECTOR
+         MOVE.W   SIRFCB+FCBLTR,4(A5) LAST TRACK & SECTOR
+         MOVE.W   SIRFCB+FCBSIZ,6(A5) NUMBER OF EMPTY SECTORS
+         RTS      RTS
+
+* FCS 5 - REWIND A FILE - REALLY CONSISTS OF JUST
+* CLOSING AND OPENING A FILE
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+* MOVEM.L MUST MATCH THAT OF FCS1
+
+FCS5     MOVEM.L  A4-A4,-(A7)
+         CMP.B    #1,FCBRW(A4)       IS RW FLAG A READ?
+         BEQ.S    FCS5A              YES, IT'S OK
+F5ER18   MOVE.B   #18,ERRTYP        NO - NOT ALLOWED
+         BRA.S    FCS5B              AND QUIT
+
+FCS5A    JSR      FCS4                 OK, GO CLOSE FILE
+         BEQ      FCS1A                IF NO ERROR, THEN OPEN IT AGAIN
+
+FCS5B    JSR      CPYERR
+         MOVEM.L  (A7)+,A4-A4      PULL
+         RTS
+
+* FCS6 - OPEN DIRECTORY FILE, AND
+* FCS16 - OPEN SYSTEM INFORMATION RECORD
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS6     MOVE.W   #$0005,FCBDAT(A4) POINT SECTR LINK TO DIR
+FCS6A    MOVE.B   #$FF,FCBSCF(A4)   NO SPACE COMPRESSION
+         CLR.B    FCBDPT(A4)         DATA POINTER TO VERY FIRST BYTE
+         RTS
+
+
+FCS16    MOVE.W   #$0003,FCBDAT(A4) POINT SECTR LINK TO SIS
+         BRA.S    FCS6A
+
+* FCS7 - READ NEXT INFORMATION ENTRY
+
+FCS7     MOVE.B   #1,FCBRW(A4)      MAKE AS IF OPEN FOR READ
+         CLR.B    FCBRAN(A4)         FORCE SEQUENTIAL
+         JSR      FREAD                GO READ DIRECTORY FILE
+         BNE.S    FCS7EX             EXIT ON ERROR
+         SUB.B    #1,FCBDPT(A4)      STEP BACK TO CHAR JUST READ
+         CMP.B    #4,FCBDPT(A4)      FIRST CHAR IN SECTOR?
+         BNE.S    FCS7A              NO, JUST CONTINUE
+         MOVE.B   #16,FCBDPT(A4)    YES, SO GO TO 16TH BYTE
+
+* NOW READ NEXT ENTRY FROM THIS SECTOR
+FCS7A    MOVE.W   FCBCTR(A4),FCBDIT(A4) CUR TR-SEC IS DIR T-S
+         CLR.L    D6                 READY TO USE AS OFFSET
+         MOVE.B   FCBDPT(A4),D6
+         MOVE.B   D6,FCBDIB(A4)     INDEX IS DIR ENTRY INDEX
+         ADD.B    #24,FCBDPT(A4)     STEP POINTER PAST THIS ENTRY
+         LEA      FCBNAM(A4),A6        WHERE TO MOVE DIR ENTRY
+         LEA      FCBDAT(A4,D6),A5     POINT INTO FCB DATA AREA
+         MOVE.L   (A5)+,(A6)+       NAME
+         MOVE.L   (A5)+,(A6)+       NAME
+         MOVE.L   (A5)+,(A6)+       EXTENSION AND ATTRIBUTES
+         MOVE.B   (A5)+,(A6)+       COPY PROTECTION BYTE
+         CLR.B    (A6)+              CLEAR NEXT BYTE
+         MOVE.B   (A5)+,(A6)+       FTR
+         MOVE.B   (A5)+,(A6)+       FSE
+         CLR.W    (A6)+              CLEAR 2 BYTES
+         MOVE.B   (A5)+,(A6)+       LTR
+         MOVE.B   (A5)+,(A6)+       LSE
+         MOVE.B   (A5)+,(A6)+       SIZE
+         MOVE.B   (A5)+,(A6)+       SIZE
+         MOVE.B   (A5)+,(A6)+       RANDOM
+         MOVE.B   (A5)+,(A6)+       TIME
+         MOVE.B   (A5)+,(A6)+       MONTH
+         MOVE.B   (A5)+,(A6)+       DAY
+         MOVE.B   (A5)+,(A6)+       YEAR
+         CLR.B    (A6)+              FINALLY CLEAR LAST BYTE
+
+         RTS
+
+FCS7EX   JSR      CPYERR
+         RTS
+
+
+         EVEN
+
+*         LIB      1.TXFMS3
+* FCS 11 - WRITE BACK DIRECTORY ENTRY
+* THIS FUNCTION IS USED INTERNALLY BY STAR-DOS, BUT IS
+* NOT DOCUMENTED BY US OR OTHERS. ANYONE USING IT DOES
+* SO AT HIS OWN RISK, AND IS TO BE ASSUMED TO BE
+* EITHER VERY SMART OR VERY STUPID.
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+FCS11    MOVE.W   FCBDIT(A4),D6     DIRECTORY TR-SEC
+         CMP.W    FCBCTR(A4),D6      CHECK IF ALSO CURRENT
+         BEQ.S    F11GO                SAME, SO IT'S STAR-DOS CALLING
+         MOVE.W   D6,FCBCTR(A4)     ELSE SOME FLUKY USER MESSING AROUND
+         JSR      FCS9                 READ DIR SCTR INTO FCB
+         BNE.S    F11EX
+         CMP.W    DIRFCB+FCBCTR,D6   CHECK IF THIS DATA IS IN DIRFCB
+         BNE.S    F11GO              NO, SO ASSUME HE'S DUMB LIKE A FOX
+         LEA      FCBDAT(A4),A6        ELSE JUST DUMB. A6->USER'S DATA AREA
+         LEA      DIRFCB+FCBDAT,A5     SAME AREA OF DIR FCB
+         MOVE.B   #64,D6            COUNTER=256/4
+MOVE11   MOVE.L   (A5)+,(A6)+       MOVE 4 BYTES
+         SUB.B    #01,D6
+         BNE.S    MOVE11
+F11GO    CLR.L    D6                 PREP FOR INDEXING
+         MOVE.B   FCBDIB(A4),D6     DIRECTORY BYTE OFFSET
+         LEA      FCBDAT(A4,D6),A6     POINT TO SPECIFIC ENTRY IN DIR
+         LEA      FCBNAM(A4),A5        POINT TO NAME IN FCB
+         MOVE.L   (A5)+,(A6)+       NAME
+         MOVE.L   (A5)+,(A6)+       NAME
+         MOVE.L   (A5)+,(A6)+       EXTENSION AND ATTRIBUTES
+         MOVE.B   (A5)+,(A6)+       COPY PROTECTION BYTE
+         LEA      1(A5),A5             SKIP UNUSED BYTE
+         MOVE.B   (A5)+,(A6)+       FTR
+         MOVE.B   (A5)+,(A6)+       FSE
+         LEA      2(A5),A5             SKIP 2 UNUSED BYTES
+         MOVE.B   (A5)+,(A6)+       LTR
+         MOVE.B   (A5)+,(A6)+       LSE
+         MOVE.B   (A5)+,(A6)+       SIZE
+         MOVE.B   (A5)+,(A6)+       SIZE
+         MOVE.B   (A5)+,(A6)+       RANDOM
+         MOVE.B   (A5)+,(A6)+       TIME
+         MOVE.B   (A5)+,(A6)+       MONTH
+         MOVE.B   (A5)+,(A6)+       DAY
+         MOVE.B   (A5)+,(A6)+       YEAR
+         JMP      FCS8                 WRITE TO DIR
+
+F11EX    RTS      RETURN IN CASE OF ERROR
+
+* FCS12 - FCS FUNCTION 12. DELETE A FILE
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS12    MOVEM.L  A4-A4,-(A7)
+
+         LEA      FCBNMB(A4),A6        POINT TO NAME BUFFER
+         LEA      FCBNAM(A4),A5        AND NAME
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       MOVE 12 BYTES FOR COMPAT
+         MOVE.L   (A5)+,(A6)+
+         MOVE.B   FCBDRV(A4),SIRFCB+FCBDRV DRIVE NUMBER
+         JSR      FINAME               FIND NAME IN DIRECTORY USING DIRFCB
+         BNE.L    FCS12E             EXIT ON ERROR
+         MOVE.L   #DIRFCB,A4        POINT TO DIRECTORY FCB
+         MOVE.B   FCBATT(A4),D5     CHECK ATTRIBUTES
+         AND.B    #$C0,D5            DELETE OR WRITE PROT BITS
+         BEQ.S    FCS12A               OK TO CONTINUE
+         MOVE.B   #12,ERRTYP        ELSE IT'S ERROR 12
+         BRA.L    FCS12E             AND EXIT
+
+FCS12A   MOVE.B   #$FF,FCBNAM(A4)   ERASE 1ST LETTER OF FILE NAME
+         BSR      FCS11                WRITE DIRECTORY BACK
+         BNE.L    FCS12E
+         MOVE.L   (A7),A5           POINT BACK TO USER'S FCB
+         MOVE.W   FCBFTR(A4),FCBFTR(A5) PUT FIRST TRACK IN HIS FCB
+         MOVE.W   FCBLTR(A4),FCBLTR(A5) PUT LAST TRACK IN HIS FCB
+         MOVE.W   FCBSIZ(A4),FCBSIZ(A5) PUT LENGTH IN HIS FCB
+         BEQ.S    FCS12E             DO NOTHING IF LENGTH =0
+         MOVE.B   FCBDRV(A4),D6     DRIVE NUMBER
+         JSR      DTPOIN               POINT A5 TO DRIVE TABLE ENTRY
+         MOVE.W   (A5),D6           LOOK AT ITS CHECKSUM
+         MOVE.B   D6,DTFLAG         =0 IF ENTRY NOT THERE, <>0 IF IT WAS
+         BNE.S    ENTHER             IF ENTRY WAS THERE
+         JSR      SUMNAM               READ SIR INTO SIRFCB & CHECKSUM IT
+         BNE.S    FCS12E             IF ERROR
+         JSR      GETSIR               GET DRIVE DATA FROM SIR INTO TABLE
+
+* NOW THAT DRIVE ENTRY IS IN TABLE, USE IT
+ENTHER   MOVE.W   4(A5),D6          TEMP SAVE LAST T-S OF FREE CHAIN
+         MOVE.W   DIRFCB+FCBLTR,4(A5) SAVE NEW LAST T-S IN TABLE
+         MOVE.W   DIRFCB+FCBSIZ,D5  LENGTH OF DELETED FILE
+         ADD.W    D5,6(A5)           ADD TO TOTAL LENGTH
+         TST.W    D6                 CHECK LAST FREE
+         BEQ.S    SIREMT             IF DISK FULL, PUT IN STARTING TOO
+         MOVE.L   #SIRFCB,A4        POINT TO SIRFCB
+         MOVE.W   D6,FCBCTR(A4)     READY TO READ OLD LAST T-S
+         JSR      FCS9                 READ IT
+         BNE.S    FCS12E
+         MOVE.W   DIRFCB+FCBFTR,FCBDAT(A4) SET UP NEW CHAIN POINTER
+         JSR      FCS10                WRITE BACK TO DISK
+         BNE.S    FCS12E               IF ERROR
+
+* UPDATE SIR FROM DRTABL. THEN, IF DRTABL ENTRY
+* EXISTED BEFORE ALL THIS (INDICATING THAT THERE
+* IS AN OPEN WRITE FILE SOMEWHERE), THEN LEAVE IT,
+* ELSE ERASE IT
+F12DON   MOVE.L   #SIRFCB,A4
+         JSR      UPDSIR               WRITE DRTABL ENTRY TO SIR
+         BNE.S    FCS12E
+         TST.B    DTFLAG             WAS DRTABL ENTRY THERE BEFORE?
+         BNE.S    FCS12E             YES, LEAVE IT
+         MOVE.L   DRTPTR,A5         NO, ERASE IT
+         CLR.W    (A5)               ERASE
+
+FCS12E   JSR      CPYERR
+         MOVEM.L  (A7)+,A4-A4
+         RTS
+
+* IF SIR INDICATES DISK WAS FULL, MAKE FIRST TR-SEC
+* OF FREE SPACE SAME AS THAT OF DELETED FILE
+SIREMT   MOVE.W   DIRFCB+FCBFTR,2(A5) DELETED BECOMES FIRST FREE
+         BRA.S    F12DON               AND THEN FINISH UP
+
+DTFLAG   FCB      0 DRIVE DATA TABLE FLAG
+
+* FCS13 - FCS FUNCTION 13. RENAME A FILE
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS13    MOVEM.L  A4-A4,-(A7)
+
+         TST.B    FCBNMS+8(A4)       LOOK AT NEW EXTENSION
+         BNE.S    FCS13A             CONTINUE IF THERE
+         MOVE.W   FCBNAM+8(A4),FCBNMS+8(A4) ELSE COPY OLD EXT TO NEW
+         MOVE.B   FCBNAM+10(A4),FCBNMS+10(A4)
+
+FCS13A   LEA      FCBNMB(A4),A6        POINT TO NAME BUFFER
+         LEA      FCBNAM(A4),A5        SAVE OLD NAME IN BUFFER
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       MOVE NAME (AND ATTRIBUTE)
+         MOVE.L   (A5)+,(A6)+
+
+         LEA      FCBNAM(A4),A6
+         LEA      FCBNMS(A4),A5        NEW NAME TO FRONT OF FCB
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       MOVE NAME (AND ATTRIBUTE)
+         MOVE.L   (A5)+,(A6)+
+
+         JSR      FINAME               FIND NEW NAME IN DIR
+         BEQ.S    F13E3              ERROR 3 - FILE EXISTS IF YES
+
+         MOVE.B   ERRTYP,D5         CHECK ERROR TYPE
+         CMP.B    #4,D5              IS IT NE?
+         BNE.S    F13EXT             NOTHING ELSE IS ALLOWED
+         CLR.B    ERRTYP             ERASE THE 04 ERROR - IT'S OK
+         CLR.B    FCBERR(A4)
+
+         MOVE.B   FCBDRV(A4),D5     DRIVE NUMBER
+         LEA      FCBNMB-FCBNAM(A4),A4 FOOL FINAME TO THINK NMB IS NAM
+         MOVE.B   D5,FCBDRV(A4)     BUT GIVE IT DRIVE NUMBER
+         JSR      FINAME               FIND OLD NAME
+         BNE.S    F13EXT             IF IT WASN'T THERE
+         MOVE.L   (A7),A4           POINT TO FCB AGAIN
+         LEA      FCBNMS(A4),A5        A5-> NEW NAME IN USER'S FCB
+         LEA      DIRFCB+FCBNAM,A6     A6-> NAME IN DIR FCB
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       MOVE NAME
+         MOVE.W   (A5)+,(A6)+
+         MOVE.B   (A5)+,(A6)+
+
+         LEA      DIRFCB,A4
+         JSR      FCS11                WRITE DIRECTORY BACK TO DISK
+         MOVE.L   (A7),A4           POINT TO FCB AGAIN
+         LEA      FCBNMB(A4),A5        A5-> OLD NAME IN USER'S FCB
+         LEA      FCBNMS(A4),A6        A6-> SECONDARY BUFFER
+         MOVE.L   (A5)+,(A6)+
+         MOVE.L   (A5)+,(A6)+       MOVE NAME FOR COMPATIBILITY
+         MOVE.W   (A5)+,(A6)+
+         MOVE.B   (A5)+,(A6)+
+F13EXT   JSR      CPYERR
+         MOVEM.L  (A7)+,A4-A4
+         RTS
+
+* ERROR EXIT
+F13E3    MOVE.B   #3,ERRTYP         ERROR 3 - FILE EXISTS
+         BRA.S    F13EXT
+
+* FCS 15 - NEXT SEQUENTIAL SECTOR
+* FCS-15 NO LONGER FITS ORIGINAL DOCUMENTATION - WRITE STILL
+* IGNORED IF NOTHING WRITTEN TO CURRENT SECTOR, BUT READ NOW
+* SKIPS SECTOR EVEN IF NOTHING WAS READ FROM SECTOR SO FAR
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS15    MOVEM.L  A4-A4,-(A7)
+         MOVE.B   FCBRW(A4),D5      CHECK FILE STATUS
+         SUB.B    #01,D5
+         BEQ.S    F15RD                IS OPEN FOR READ
+         SUB.B    #01,D5
+         BNE      F5ER18               MUST BE ERROR 18 IF WASN'T A 2
+
+* FILE WAS OPEN FOR WRITE
+F15WR    CMP.B    #4,FCBDPT(A4)      DPT AT BEGINNING OF SECTOR?
+         BEQ.S    F13EXT             YES, JUST EXIT; ELSE FALL THRU
+
+* WRITE A 0 TO THE FILE
+         CLR.B    D5
+         CLR.B    FCBDPT(A4)         CLEAR DATA POINTER
+         JSR      FWRITE               GO WRITE CURRENT SECTOR
+         BNE.S    F13EXT             EXIT ON ERROR
+         AND.B    #$FE,FCBDPT(A4)    CHANGE 5 TO 4, LEAVE 0 AS IS
+         BRA.S    F13EXT             COPY ERROR, IF ANY, AND EXIT
+
+* READ THE FILE
+F15RD    CLR.B    D5
+         CLR.B    FCBDPT(A4)         CLEAR DATA POINTER
+         JSR      FREAD                GO READ NEXT OR WRITE CURRENT SECTOR
+         BNE.S    F13EXT             EXIT ON ERROR
+         AND.B    #$FE,FCBDPT(A4)    CHANGE 5 TO 4, LEAVE 0 AS IS
+         BRA.S    F13EXT             COPY ERROR, IF ANY, AND EXIT
+
+* FCS 17 - GET RANDOM BYTE FROM FILE
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS17    CLR.L    D5                 READY FOR CHARACTER
+         MOVE.B   FCBRIN(A4),D5     GET RANDOM POINTER
+         MOVE.B   FCBDAT(A4,D5),D5  GET BYTE FROM FCB
+         CLR.L    D6                 CLEAR ERROR FLAG
+         RTS
+
+* FCS 18 - PUT RANDOM BYTE INTO FILE
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS18    MOVE.B   FCBRW(A4),D6      CHECK FOR UPDATE STATUS
+         AND.B    #$7F,D6
+         CMP.B    #3,D6              CHECK FOR 3 OR 83
+         BNE.S    F18ER1               ERROR 1 IF NOT OPEN FOR UPDATE
+         CLR.L    D6
+         MOVE.B   FCBRIN(A4),D6     GET RANDOM POINTER
+         MOVE.B   D4,FCBDAT(A4,D6)  PUT BYTE INTO FCB DATA AREA
+         MOVE.B   #$83,D6           SIGNAL UPDATED SECTOR
+         MOVE.B   D6,FCBRW(A4)      PUT BACK
+         MOVE.B   D6,FCBUPD(A4)     ALSO SIGNAL GLOBAL UPDATE
+         CLR.L    D6                 CLEAR ERROR
+         RTS
+
+F18ER1   MOVE.B   #1,ERRTYP
+         MOVE.B   #1,FCBERR(A4)     ALSO INTO FCB
+         RTS
+
+* FCS 20 - FIND NEXT READY DRIVE
+*
+* CALLED BY:
+* INPUT: USUALLY FCB HAS DRIVE $FF
+* OUTPUT: NEXT AVAILABLE DRIVE NUM IN FCB
+* REGISTERS USED: D5 (DCHK USES D6 AND A6)
+
+FCS20    MOVE.B   FCBDRV(A4),D5     GET CURRENT DRIVE NUMBER
+         ADD.B    #01,D5             GO TO NEXT
+         CMP.B    MAXDRV,D5          CHECK AGAINST MAXIMUM
+         BHI.S    F20NG              NG IF OVER MAX
+         MOVE.B   D5,FCBDRV(A4)     ELSE SAVE
+         LEA      DRUSED(PC),A6        POINT TO DRIVE USED TABLE
+         AND.L    #$F,D5             CLEAR REST OF D5
+         MOVE.B   0(A6,D5.W),D5      GET PHYSICAL DRIVE NUMBER
+         BEQ.S    FCS20              IF NO SUCH DRIVE
+         AND.B    #$0F,D5            KEEP ONLY PHYSICAL DRIVE
+         MOVE.B   D5,FCBPHY(A4)     PUT PHYSICAL DRIVE INTO FCB
+         BSR.S    DCHK               CHECK IF READY
+         BNE.S    FCS20              REPEAT IF NOT READY
+         AND.B    #$FE,CCR
+         RTS
+
+F20NG    MOVE.B   #16,ERRTYP        DRIVE NOT READY
+         MOVE.B   #16,FCBERR(A4)    STORE INTO FCB
+         DC.L     $003C0001 OR #1,CCR SET CARRY
+         RTS
+
+DCHK     JSR      SECCHK               CHECK SECONDARY DRIVERS FIRST
+         JMP      DICHEK               THEN PRIMARY DRIVERS
+
+* FCS 21 - POSITION TO RECORD N
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS21    TST.B    FCBRAN(A4)         IS IT RANDOM?
+         BEQ      ERR19                NO
+         MOVEM.L  D4/A4,-(A7)
+         BSR      WRUPDA               WRITE OUT CURRENT IF UPDATED
+         BNE.S    F21RTS               IF ERROR
+RN2123   MOVE.W   FCBCRN(A4),D7     GET DESIRED REC NO
+         BNE.S    GETREC               WANT REAL RECORD
+
+* IF CRN=0, MEANS WANT MAP ONLY
+         MOVE.W   FCBFTR(A4),D6     POINT TO IT
+FCS21A   MOVE.W   D6,FCBCTR(A4)     IS CURRENT
+         JSR      FCS9                 GO READ IT
+         BNE.S    F21RTS
+         MOVE.B   #4,FCBDPT(A4)     DATA POINTER = 4
+         MOVE.W   FCBDAT+2(A4),D5   GET RECORD NUMBER
+         CMP.W    FCBCRN(A4),D5      CHECK IT
+         BNE      ERR25                IF DOESN'T MATCH
+F21RTS   MOVEM.L  (A7)+,D4/A4
+         RTS
+
+* IF CRN>0, MEANS GET A REAL RECORD
+GETREC   ADD.W    #2,D7              NUMBER OF SECTORS IN FILE?
+         CMP.W    FCBSIZ(A4),D7        COMPARE WITH ACTUAL FILE SIZE
+         BHI.S    ERR24                BAD IF TOO LARGE
+         BSR      RDFMAP               READ FILE MAP
+         BNE.S    F21RTS
+         LEA      FILMAP,A6            POINT TO IT
+         MOVE.W   FCBCRN(A4),D7     GET DESIRED RECORD NUMBER
+
+* NOW LOOP THROUGH MAP UNTIL WE FIND IT
+CKNEXT   TST.B    2(A6)              CHECK COUNT
+         BEQ.S    ERR24              BAD NUMBER
+         CLR.L    D6                 READY FOR SUBTRACTION
+         MOVE.B   2(A6),D6          GET SEGMENT SIZE
+         SUB.W    D6,D7              SUBTRACT SEGMENT FROM DESIRED
+         BEQ.S    GET21              ZERO MEANS GO GET IT
+         MOVE.L   D7,D6             COPY INTO D6
+         LSR.W    #8,D6              MOVE BYTE 1 RIGHT
+         CMP.B    #$FF,D6            BELOW ZERO?
+         BEQ.S    GET21              YES, GO GET IT
+NOTZER   LEA      3(A6),A6             ELSE GO TO NEXT ENTRY
+         BRA.S    CKNEXT
+
+* NOW CALCULATE NEXT ENTRY
+GET21    ADD.B    2(A6),D7           FIX SECTOR COUNT
+         MOVE.B   (A6),D6           GET TRACK
+         MOVE.B   1(A6),D5          SECTOR
+
+ONEMOR   SUB.B    #01,D7             BUMP COUNTER
+         BEQ.S    NOWON
+         ADD.B    #01,D5             BUMP SECTOR
+         CMP.B    FCBSPT(A4),D5      PAST END OF TRACK?
+         BLS      ONEMOR               NO
+         MOVE.B   #1,D5             YES, START NEXT TRACK
+         ADD.B    #1,D6              NEXT TRACK
+         BRA.S    ONEMOR               REPEAT UNTIL DONE
+
+NOWON    LSL.W    #8,D6              MOVE TRACK LEFT ONE BYTE
+         ADD.B    D5,D6              ADD IN SECTOR AT RIGHTTOR ADDRESS
+         BRA.L    FCS21A               GO GET IT AND QUIT
+
+* ON TOO LARGE RECORD, RETURN FIRST FILE MAP SECTOR FOR COMPATIBILITY
+ERR24    MOVE.W   FCBFTR(A4),FCBCTR(A4) MAP BECOMES CURRENT SECTOR
+         LEA      FCBDAT(A4),A5        POINT TO DATA AREA
+         LEA      HDR1,A6              AND TO HEADER AND DATA
+         MOVE.W   #63,D6            COUNTER = 256/4-1
+E24MOV   MOVE.L   (A6)+,(A5)+       MOVE FOUR BYTES
+         DBRA     D6,E24MOV
+         MOVE.B   #24,D5            REC NO TOO LARGE
+         BRA.S    ERR25A
+
+ERR25    MOVE.B   #25,D5            REC NO DOESN'T MATCH
+ERR25A   MOVE.B   D5,FCBERR(A4)
+         MOVE.B   D5,ERRTYP
+         MOVEM.L  (A7)+,D4/A4
+         RTS
+
+* FCS 22 - BACKUP ONE RECORD
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS22    TST.B    FCBRAN(A4)         CHECK IF RANDOM
+         BNE.S    FCS22A             YES, OK TO DO
+ERR19    MOVE.B   #19,FCBERR(A4)    ERROR 19 - FILE NOT RANDOM
+         MOVE.B   #19,ERRTYP
+         RTS
+
+FCS22A   SUB.W    #1,FCBCRN(A5)      BACKUP ONE
+         BRA      FCS21                GO SEEK TO IT
+
+* FCS 23 - POSITION TO RECORD N, BUT EXTEND FILE IF PAST END
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT:
+* REGISTERS USED:
+
+
+FCS23    TST.B    FCBRAN(A4)         IS IT RANDOM?
+         BEQ.S    ERR19              NO
+         BSR      FCS21                TRY TO POSITION
+         BNE.S    FCS23A             IF THERE WAS AN ERROR
+F23RTS   RTS      ELSE JUST EXIT IF SECTOR WAS FOUND
+
+FCS23A   CLR.B    ERRTYP
+         CMP.B    #24,FCBERR(A4)     CHECK TYPE OF ERROR IS IT 24?
+         BNE.S    F23RTS             NO, SOME OTHER KIND OF ERROR
+         MOVEM.L  D4/A4,-(A7)
+         MOVE.W   FCBCRN(A4),D6     GET DESIRED RECORD NUMBER
+         MOVE.W   D6,CRNTMP         TEMPORARILY SAVE IT
+         CMP.W    #42840,D6          CHECK MAXIMUM SIZE
+         BHI.L    ERR24              BAD NUMBER
+
+* OK, WE NEED TO EXTEND THE FILE. FIRST GO READ LAST SECTOR
+         MOVE.W   FCBLTR(A4),FCBCTR(A4) LAST IS NOW CURRENT TR-SEC
+         MOVE.B   #9,FCBUPD(A4)     MARK FILE AS UPDATED
+         JSR      FCS9                 ...GO READ IT
+         BNE.S    F23EXI               EXIT ON ERROR
+         MOVE.B   #2,FCBRW(A4)      STATUS BECOMES WRITE
+         MOVE.B   #2,FCBUPD(A4)     SET FILE UPDATE FLAG
+         CLR.B    FCBDPT(A4)         POINT PAST END OF SECTOR
+         MOVE.W   FCBDAT+2(A4),FCBCRN(A4) UPDATE CURRENT RECORD NUMBER
+
+* NOW START WRITING EMPTY SECTORS
+F23SKP   CLR.L    D4                 WRITE A ZERO
+         JSR      FWRITE               GO WRITE
+         BNE.S    F23EXI             EXIT ON ERROR
+         MOVE.W   FCBCRN(A4),D6     GET CURRENT RECORD NUMBER
+         CMP.W    CRNTMP,D6          COMPARE WITH DESIRED SECTOR
+         BEQ.S    F23DON             FINISH UP WHEN DONE
+         JSR      FCS15                GO SKIP SECTOR
+         BNE.S    F23EXI             ON ERROR
+         BRA.S    F23SKP
+
+* WHEN DONE, CLOSE AND REOPEN FILE
+F23DON   JSR      FCS4                 CLOSE THE FILE
+         BNE.S    F23EXI             EXIT ON ERROR
+         JSR      FCS3                 REOPEN FILE FOR UPDATING
+         BNE.S    F23EXI             EXIT ON ERROR
+         MOVE.W   CRNTMP,FCBCRN(A4) RESTORE DESIRED RECORD NUMBER
+         BRA.L    RN2123             SEEK BACK TO DESIRED SECTOR
+
+F23EXI   MOVEM.L  (A7)+,D4/A4
+         RTS
+
+
+* FCS8 - WRITE NEXT INFORMATION ENTRY
+*        (EITHER DIRECTORY OR SIR)
+* FCS9 AND FCS10 - FCS FUNCTIONS 9 (READ) AND
+*        10 (WRITE) SINGLE SECTOR
+
+* CALLED BY:
+*      FCS9: FCS0 RDFMAP FCS4 WRUPDA FCS12 R2123 GRABIT
+*      FCS10: FCS0 F0WRIT PUTINM FCS2 FCS4 WRUPDA UPDSIR FCS12
+* INPUT: A4 POINTS TO FCB
+* OUTPUT: ZERO IF NO ERROR; ERROR CODE IN ERRTYP AND FCBERR
+* REGISTERS USED: IMPORTANT TO PRESERVE ALL!!!
+
+
+* READ ENTRY POINT
+
+FCS9
+         MOVEM.L  D5/A6,-(A7)
+         MOVE.B   FCBDRV(A4),D5     CHECK DRIVE NUMBER
+         CMP.B    MAXDRV,D5          AGAINST MAXIMUM
+         BHI      F9DRER               IF HIGHER THAN MAX
+         LEA      DRUSED(PC),A6        POINT TO DRIVE USED TABLE
+         AND.L    #$F,D5             CLEAR REST OF D5
+         MOVE.B   0(A6,D5.W),FCBPHY(A4) GET PHYSICAL DRIVE NUMBER
+         BEQ.S    F9DRER             IF NO SUCH DRIVE
+         MOVEM.L  (A7)+,D5/A6
+         JSR      SECTRD               FIRST CHECK OPTIONAL DRIVERS
+         JMP      DIREAD               THEN PRIMARY DRIVERS
+
+F9DRER   MOVEM.L  (A7)+,D5/A6
+         MOVE.B   #15,FCBERR(A4)
+         MOVE.B   #15,ERRTYP        PUT IN ERROR CODE 15
+         RTS      AND RETURN
+
+* WRITE ENTRY POINT
+
+FCS10
+FCS8
+         MOVEM.L  D5-D6/A6,-(A7)
+         MOVE.B   FCBDRV(A4),D5     CHECK LOGICAL DRIVE NUMBER
+         CMP.B    MAXDRV,D5          AGAINST MAXIMUM
+         BHI      F10DER               IF HIGHER THAN MAX
+         LEA      DRUSED(PC),A6        POINT TO DRIVE USED TABLE
+         AND.L    #$F,D5             CLEAR REST OF D5
+         MOVE.B   10(A6,D5.W),D6    GET DRIVE WRITE PROTECT CODE
+         BMI.S    F10WPE             IF WRITE PROTECTED
+         MOVE.B   0(A6,D5.W),FCBPHY(A4) GET PHYSICAL DRIVE NUMBER
+         BEQ.S    F10DER             IF NO SUCH DRIVE
+         MOVEM.L  (A7)+,D5-D6/A6
+         JSR      SECTWR               FIRST CHECK OPTIONAL DRIVERS
+         JMP      DIWRIT               THEN PRIMARY DRIVERS
+
+* ON DRIVE NUMBER ERROR
+
+F10DER   MOVEM.L  (A7)+,D5-D6/A6
+         MOVE.B   #15,FCBERR(A4)
+         MOVE.B   #15,ERRTYP        PUT IN ERROR CODE 15
+         RTS      AND RETURN
+
+* ON WRITE-PROTECTED DRIVE ERROR
+
+F10WPE   MOVEM.L  (A7)+,D5-D6/A6
+         MOVE.B   #11,FCBERR(A4)
+         MOVE.B   #11,ERRTYP        PUT IN ERROR CODE 11
+         RTS      AND RETURN
+
+* DISK RESTORE AND DISK SEEK ROUTINES: CONVERT LOGICAL TO
+* PHYSICAL DRIVE (FLOPPY ONLY) AND PUT INTO FCB
+
+DIREPH   BSR.S    CVTL2P             CONVERT LOGICAL TO PHYSICAL
+         JMP      DIREST               THEN GO TO DRIVERS
+DISEPH   BSR.S    CVTL2P             CONVERT LOGICAL TO PHYSICAL
+         JMP      DISEEK               THEN GO TO DRIVERS
+
+CVTL2P   MOVE.B   FCBDRV(A4),D5     CHECK LOGICAL DRIVE NUMBER
+         CMP.B    MAXDRV,D5          AGAINST MAXIMUM
+         BHI      CVTERR               IF HIGHER THAN MAX
+         LEA      DRUSED(PC),A6        POINT TO DRIVE USED TABLE
+         AND.L    #$F,D5             CLEAR REST OF D5
+         MOVE.B   0(A6,D5.W),D5      GET PHYSICAL DRIVE NUMBER
+         MOVE.B   D5,FCBPHY(A4)     PUT INTO FCB
+         BTST.B   #4,D5             CHECK IF FLOPPY
+         BEQ.S    CVTERR             NO
+         RTS      OK, RETURN
+
+* ON DRIVE NUMBER ERROR
+
+CVTERR   MOVE.B   #15,D5            ERROR 15
+         MOVE.B   D5,FCBERR(A4)
+         ADD.L    #4,A7              REMOVE RETURN ADDRESS
+         LSR.B    #1,D5              NON-ZERO AND SET CARRY
+         RTS      RETURN TO USER
+
+         EVEN
+
+*         LIB      1.TXFMSUBR
+
+* FCS SUBROUTINE CODE FOLLOWS
+
+* GRABIT - SUBROUTINE TO GRAB NEXT SECTOR FROM FREE CHAIN
+*  ENTRY: ASSUMES DRTABL HAS AN ENTRY FOR DRIVE, BUT
+*         READS IT IN IF NOT THERE
+*         A4-> FCB WHERE SPACE IS NEEDED
+*  DURING: A5-> SIRFCB, A6-> DRTABL ENTRY
+*  EXIT: T-S OF FOUND SECTOR IS IN FCBLTR,A4
+*        Z INDICATES MINOR ERROR, ELSE ROUTINE IMMEDIATELY
+*          RETURNS TO WARMS ON DIR OR SIR ERROR
+
+GRABIT   MOVEM.L  A4-A4,-(A7)
+
+         MOVE.B   FCBDRV(A4),D6     DRIVE NUMBER
+         MOVE.B   D6,SIRFCB+FCBDRV  SAVE IN SIR FCB
+         JSR      DTPOIN               POINT TO DRIVE'S ENTRY IN DRTABL
+         MOVE.L   A5,A6             SAVE IT IN A6
+         TST.B    1(A6)              DOES CHECKSUM EXIST IN DRTABL?
+         BNE.S    GRBYES             YES
+         MOVEM.L  A6-A6,-(A7)
+         JSR      SUMNAM               NO, CHECKSUM ETC.
+         MOVEM.L  (A7)+,A6-A6
+         BNE.S    GRABEX             IF ERROR
+         JSR      GETSIR               COPY SIR DATA INTO DRTABL
+GRBYES   MOVE.W   6(A6),D5          NUMBER OF FREE
+         BEQ.S    GRFULL             DISK FULL!
+         MOVE.W   2(A6),D5          1ST FREE SECTOR
+         BEQ.S    GRFULL             DISK FULL!
+* NOT FULL, GRAB A SECTOR
+         MOVE.W   D5,FCBLTR(A4)     SAVE AS LAST
+         MOVE.L   #SIRFCB,A4        POINT BACK TO FCB
+         MOVE.W   D5,FCBCTR(A4)     CURRENT TRACK
+         JSR      FCS9                 READ 1ST FREE SECTOR
+         BNE.S    GRABEX
+         MOVE.W   FCBDAT(A4),D5     POINTER TO 2ND FREE
+         BEQ.S    CLEARG             CLEAR EVERYTHING IF ZERO
+         MOVE.W   D5,2(A6)          PUT INTO TABLE
+         MOVE.W   6(A6),D5
+         SUB.W    #1,D5              DECREMENT NO. OF FREE
+         BEQ.S    CLEARG             CLEAR EVERYTHING IF ZERO
+         MOVE.W   D5,6(A6)
+         CLR.L    D5                 NO ERROR ON Z
+         MOVEM.L  (A7)+,A4-A4
+         RTS
+
+* IF DISK IS FULL, CAN'T GRAB IT
+GRFULL   BSR.S    GRCLR              CLEAR TABLE ENTRY
+         BNE.S    GRABEX
+         MOVE.B   #7,ERRTYP         DISK FULL
+GRABEX   JSR      CPYERR
+         MOVEM.L  (A7)+,A4-A4
+         RTS
+
+ERR5     MOVE.B   #5,ERRTYP         DIRECTORY ERROR IF NOT IN TABLE
+         BRA.S    GRABEX
+
+* CLEAR ALL WHEN DISK FILLED UP
+CLEARG   BSR.S    GRCLR              CLEAR ALL
+         BRA.S    GRABEX             AND EXIT
+
+GRCLR    CLR.L    2(A6)              MAKE EVERYTHING ZERO
+         CLR.W    6(A6)
+         MOVE.L   4(A7),A4          POINT BACK TO FCB
+         JSR      UPDSIR               WRITE TABLE BACK TO DISK
+         RTS      RTS AND RETURN
+* CHKUSE - CHECK WHETHER AN FCB IS ALREADY IN USE
+*
+* CALLED BY: FCS1 AND FCS2
+* INPUT: A4 POINTS TO FCB TO BE CHECKED
+* OUTPUT: ZERO IF NOT IN USE, ELSE ERROR 2
+* REGISTERS USED: D7, A5, A6
+
+CHKUSE   LEA      FCBLST(A4),A6        POINT A6 TO THIS FCB'S LST LOCATION
+         MOVE.L   #FBAPTR,A5        POINT TO DOS'S POINTER
+SINUSE   MOVE.L   (A5),D7           GET POINTER TO NEXT FCB
+         BEQ.S    SNOTIN             FINISHED WITHOUT FINDING ONE IS OK
+         MOVE.L   D7,A5
+         CMP.L    A5,A6              COMPARE WITH CURRENT FCB
+         BNE.S    SINUSE             NOT FOUND, SO CHECK NEXT
+* FOUND ANOTHER ONE WITH OPEN
+         MOVE.B   #2,ERRTYP         ERROR 2
+         MOVE.B   #2,FCBERR(A4)
+SNOTIN   RTS
+
+* FINAME - FIND NAME IN DIRECTORY
+*
+* CALLED BY:
+* INPUT: A4-> FCB WITH NAME TO BE FOUND
+* OUTPUT: ZERO IF FOUND, ELSE ERROR CODE IN CALLING FCB
+* REGISTERS USED: D3/D4 RESTORED,
+
+MEMD3    RMB      4         
+MEMD4    RMB      4
+MEMD7    RMB      4
+
+FINAME   MOVEM.L  D3-D4/A4,-(A7)
+
+         CLR.B    ERRTYP                     NO ERROR SO FAR
+         MOVE.L   A4,A6                      SAVE FCB POINTER IN A6
+         MOVE.L   FCBNAM(A4),D3              PUT USER'S NAME INTO D3-D7
+         MOVE.L   D3,MEMD3
+         MOVE.L   FCBNAM+4(A4),D4
+         MOVE.L   D4,MEMD4
+         MOVE.L   FCBNAM+8(A4),D7                  
+         CLR.B    D7                         HAS 11, NOT 12 CHARS
+         MOVE.L   D7,MEMD7
+         
+         MOVE.B   FCBDRV(A4),DIRFCB+FCBDRV   DR NUM INTO DIR FCB
+         MOVE.L   #DIRFCB,A4                 POINT TO DIRECTORY FCB
+* OPEN DIRECTORY (SAME AS FCS6)
+         MOVE.W   #$0005,FCBDAT(A4)          SECTOR LINK POINTS TO FIRST
+         MOVE.B   #$FF,FCBSCF(A4)            NO SPACE COMPRESSION
+         CLR.B    FCBDPT(A4)                 DATA POINTER TO BYTE 0
+
+FINLO1   JSR      FCS7                       READ NEXT DIR ENTRY
+         BNE.S    FINAER                     EXIT ON ERROR
+         TST.B    FCBNAM(A4)                 CHECK FIRST CHAR IN DIR ENTRY
+         BEQ.S    FINER4                     END OF DIR IF 00
+
+		 MOVE.L   MEMD3,D3
+		 MOVE.L   MEMD4,D4
+		 MOVE.L   MEMD7,D7
+
+         CMP.L    FCBNAM(A4),D3              COMPARE FIRST FOUR
+         BNE.S    FINLO1                     DO NEXT IF DIFFERENT
+         CMP.L    FCBNAM+4(A4),D4            COMPARE NEXT FOUR
+         BNE.S    FINLO1                     DO NEXT IF DIFFERENT
+         MOVE.L   FCBNAM+8(A4),D5
+         CLR.B    D5
+         CMP.L    D5,D7                      COMPARE LAST THREE
+         BNE.S    FINLO1                     DO NEXT IF DIFFERENT
+
+FINAEX   MOVEM.L  (A7)+,D3-D4/A4
+         JSR      CPYERR
+         RTS
+
+* ON ERROR DURING ACTUAL READING, CHECK IF EOF
+FINAER   CMP.B    #8,ERRTYP          EOF?
+         BNE.S    FINAEX             NO, MUST BE SOMETHING ELSE
+FINER4   MOVE.B   #4,ERRTYP         ELSE NAME NOT FOUND
+         BRA.S    FINAEX             AND EXIT
+
+* SUMNAM - READ SIR INTO SIRFCB AND CHECKSUM NAME AND DISK NUMBER
+*
+* CALLED BY:
+* INPUT:
+* OUTPUT: NUMBER OF SECT/TR IN B AND ZERO CONDITION IF OK
+* REGISTERS USED: D5 AND D6; RESTORES A4
+
+
+SUMNAM   MOVEM.L  A4-A5,-(A7)
+
+         MOVE.L   #SIRFCB,A4
+         JSR      FCS16                OPEN SIR
+         JSR      FCS7                 READ IT
+         BNE.S    SUMNEX
+         CLR.L    D5                 SET CHECKSUM TO 0
+         DC.L     $023C00FE AND #$FE,CCR CLEAR CARRY
+         MOVE.L   SIRFCB+FCBRAN,D5  3 BYTES OF DATE + TRACK
+         ROL.L    #1,D5
+         EOR.L    D5,SIRFCB+FCBNAM   EOR IN 4 BYTES FROM NAME
+         ROL.L    #1,D5
+         EOR.L    D5,SIRFCB+FCBNAM+4 EOR NEXT 4 BYTES OF NAME
+         ROL.L    #1,D5
+         EOR.L    D5,SIRFCB+FCBNAM+8 EOR EXT AND PART OF NUMBER
+         ROL.L    #1,D5
+         EOR.B    D5,SIRFCB+FCBNAM+4 EOR REST OF NUMBER
+         MOVE.L   D5,D6             PUT INTO D6
+         LSR.L    #8,D5
+         LSR.L    #8,D5              MOVE LEFT 2 BYTES RIGHT
+         EOR.W    D6,D5              COMBINE WITH RIGHT 2 BYTES
+         OR.B     #1,D5               ENSURE IT'S NOT ZERO
+         MOVE.W   D5,CHKSUM         STORE CHECKSUM
+         MOVE.L   #0,D5             RESET Z ERROR
+
+SUMNEX   MOVEM.L  (A7)+,A4-A5
+         RTS
+
+* CPYERR ROUTINE - TEST ERRTYP AND ALSO
+* MOVE IT INTO FCB ERROR BYTE
+*
+* CALLED BY: EVERYBODY
+* INPUT: FCB ADDRESS IN A4, ERROR CODE IN ERRTYP
+* OUTPUT: ERROR CODE IN FCB
+* REGISTERS USED:  A5
+
+
+CPYERR   MOVE.L   CURFCB,A5         RESTORE INDEX
+         MOVE.B   ERRTYP,1(A5)      MOVE ERROR INTO FCB
+         RTS      RTS AND RETURN WITH ERROR IN Z
+
+* RSTRIO - RESTORE I/O BACK TO CONSOLE I/O
+*
+* CALLED BY: USER AND WARMS
+* INPUT:
+* OUTPUT:
+* REGISTERS USED: NONE
+
+
+RESIO    CLR.L    FOADDR             CLEAR FILE OUT ADDR
+         CLR.L    FIADDR             CLEAR FILE IN ADDR
+         CLR.B    SPECIO             CLEAR SPECIAL IO FLAG
+         RTS
+
+* DEFEXT - SET DEFAULT EXTENSION
+*
+* CALLED BY: USER
+* INPUT: D4=DEFAULT EXTENSION CODE, A4=FCB ADDR
+* OUTPUT:
+* REGISTERS USED: D5, A5
+
+DEFEXT   MOVE.B   FCBEXT(A4),D5     CHECK EXISTING EXTENSION
+         BEQ.S    SETEX0             PROBABLY SET IT IF NULL
+         CMP.B    #$20,D5            IS IT SPACE?
+         BNE.S    SETEX2             NOT SPACE, SO IT'S PROBABLY OK
+
+SETEX0   MOVE.B   FCBDRV(A4),D5
+         SUB.B    #$10,D5            CVT 10-17 TO 0-7
+         CMP.B    #7,D5              CHECK IF A DEVICE
+         BLS.S    SETEX2             YES, SO IGNORE
+
+SETEX1   CMP.B    #14,D4             CHECK FOR MAXIMUM
+         BHI.S    SETEX2             IGNORE IF >14
+         CLR.L    D5                 READY FOR MULTIPLY
+         MOVE.B   D4,D5
+         MULU     #3,D5               MULT BY 3
+         MOVE.L   #EXTTAB,A5        POINT TO TABLE
+         MOVE.B   0(A5,D5),FCBEXT(A4) FIRST LETTER OF EXTENSION
+         MOVE.B   1(A5,D5),FCBEXT+1(A4)
+         MOVE.B   2(A5,D5),FCBEXT+2(A4) THIRD LETTER
+
+SETEX2   RTS
+
+EXTTAB   FCC      'BINTXTCOMBASSYSBAKSCRDATBACDIRPRTOUT'
+
+
+
+         FCC      'BATSRCPIP'
+
+SKEND    EQU      *                    THIS IS THE END OF SK*DOS
+
+         END      COLDSV
+
