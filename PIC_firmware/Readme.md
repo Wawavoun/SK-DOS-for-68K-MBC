@@ -2,9 +2,9 @@ Here is the modified PIC firmware.
 
 Modifications are :
 
-    enable disk set 1
-    load SKDOS.BIN if disk set 1 selected
-    enable 512 bytes per sector in this case.
+- enable disk set 1
+- load SKDOS.BIN if disk set 1 selected
+- enable 512 bytes per sector in this case.
 
 Use hex file provided into PIC directory to flash the new firmware into the PIC.
 
