@@ -8,3 +8,5 @@ The PIC firmware need some modifications :
 Use hex file provided into PIC directory to install the new firmware.
 
 Even with the modifications CPM 68K is still useable if you select disk set 0.
+
+
